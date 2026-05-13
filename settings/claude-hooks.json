@@ -53,6 +53,7 @@
     ],
     "PreToolUse": [
       {
+        "matcher": "Bash|Edit|Read|Write|Glob|Grep|WebFetch|WebSearch|TaskCreate|TaskUpdate|TaskList",
         "hooks": [
           {
             "type": "command",
@@ -63,6 +64,7 @@
     ],
     "PostToolUse": [
       {
+        "matcher": "Bash|Edit|Read|Write|Glob|Grep|WebFetch|WebSearch|TaskCreate|TaskUpdate|TaskList",
         "hooks": [
           {
             "type": "command",

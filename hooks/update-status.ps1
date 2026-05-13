@@ -6,6 +6,15 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
+# Debug log so we can verify every hook invocation, not just the "last_event"
+# that survives in the session file. Tail logs/hooks-debug.log to see firings.
+try {
+    $debugDir = 'C:\Users\hdcooper\Hardware-interface\logs'
+    if (-not (Test-Path $debugDir)) { New-Item -ItemType Directory -Path $debugDir -Force | Out-Null }
+    $debugLine = "$(Get-Date -Format 'o')`t$Event`t$([System.IO.Path]::GetFileName($MyInvocation.MyCommand.Path))"
+    Add-Content -Path (Join-Path $debugDir 'hooks-debug.log') -Value $debugLine -Encoding UTF8
+} catch { }
+
 $hookJson = [Console]::In.ReadToEnd()
 $payload = if ($hookJson) {
     try { $hookJson | ConvertFrom-Json } catch { $null }
@@ -24,21 +33,30 @@ if (-not (Test-Path $sessionsDir)) {
 $statusPath = Join-Path $sessionsDir "$sessionId.json"
 
 # Load existing per-session status, or initialize.
-$status = if (Test-Path $statusPath) {
-    Get-Content $statusPath -Raw | ConvertFrom-Json
-} else {
-    [pscustomobject]@{
-        state         = 'idle'
-        project       = $null
-        model         = $null
-        fast_mode     = $false
-        session_id    = $sessionId
-        claude_pid    = $null
-        claude_hwnd   = $null
-        first_seen    = (Get-Date).ToUniversalTime().ToString('o')
-        last_event    = $null
-        last_updated  = $null
-    }
+# Always rebuild as a fully-shaped pscustomobject so missing fields from an
+# older schema (e.g. pre-claude_hwnd files) get added on the next event.
+$loaded = if (Test-Path $statusPath) {
+    try { Get-Content $statusPath -Raw | ConvertFrom-Json } catch { $null }
+} else { $null }
+
+function Get-FieldOrDefault {
+    param($obj, [string]$name, $default)
+    if ($obj -and ($obj.PSObject.Properties.Name -contains $name)) { return $obj.$name }
+    return $default
+}
+
+$nowIso = (Get-Date).ToUniversalTime().ToString('o')
+$status = [pscustomobject]@{
+    state         = Get-FieldOrDefault $loaded 'state'        'idle'
+    project       = Get-FieldOrDefault $loaded 'project'      $null
+    model         = Get-FieldOrDefault $loaded 'model'        $null
+    fast_mode     = Get-FieldOrDefault $loaded 'fast_mode'    $false
+    session_id    = $sessionId
+    claude_pid    = Get-FieldOrDefault $loaded 'claude_pid'   $null
+    claude_hwnd   = Get-FieldOrDefault $loaded 'claude_hwnd'  $null
+    first_seen    = Get-FieldOrDefault $loaded 'first_seen'   $nowIso
+    last_event    = Get-FieldOrDefault $loaded 'last_event'   $null
+    last_updated  = Get-FieldOrDefault $loaded 'last_updated' $null
 }
 
 $status.state = switch ($Event) {
@@ -70,22 +88,39 @@ if ($payload.model) {
 # process eventually descends from explorer; accepting the first window
 # ancestor would mis-capture it as the "Claude" PID.
 $TERMINAL_NAMES = @('powershell','pwsh','WindowsTerminal','conhost','cmd','windowsterminalpreview')
+# Reset captured target before searching — stale values from an earlier
+# (broken) walker shouldn't survive. We re-resolve on every hook event.
+$status.claude_pid  = $null
+$status.claude_hwnd = $null
+
+# Find the terminal window via global search. Walking the parent chain
+# doesn't work because Windows Terminal hosts shells via ConPTY, breaking
+# the Windows process-tree relationship — WT isn't in the parent chain
+# of its hosted shells. So we look at every terminal-class window on
+# the desktop and prefer ones whose title contains this session's project.
 try {
-    $walk = $PID
-    for ($i = 0; $i -lt 8 -and $walk -gt 0; $i++) {
-        $walk = (Get-CimInstance Win32_Process -Filter "ProcessId=$walk" -ErrorAction SilentlyContinue).ParentProcessId
-        if (-not $walk) { break }
-        $cand = Get-Process -Id $walk -ErrorAction SilentlyContinue
-        if ($cand -and
-            $cand.MainWindowHandle -ne [IntPtr]::Zero -and
-            $TERMINAL_NAMES -contains $cand.ProcessName) {
-            $status.claude_pid  = [int]$walk
-            # Capture the HWND too — robust against PID lookups failing later
-            # (e.g. WMI hiccups) and gives send-keys.ps1 a direct target.
-            $status.claude_hwnd = [int64]$cand.MainWindowHandle
-            break
-        }
+    $terminals = Get-Process -ErrorAction SilentlyContinue | Where-Object {
+        $_.MainWindowHandle -ne [IntPtr]::Zero -and
+        $TERMINAL_NAMES -contains $_.ProcessName
     }
+    $picked = $null
+    if ($status.project) {
+        $picked = $terminals | Where-Object { $_.MainWindowTitle -match [regex]::Escape($status.project) } | Select-Object -First 1
+    }
+    if (-not $picked) {
+        $picked = $terminals | Where-Object { $_.MainWindowTitle -match 'Claude' } | Select-Object -First 1
+    }
+    if ($picked) {
+        $status.claude_pid  = [int]$picked.Id
+        $status.claude_hwnd = [int64]$picked.MainWindowHandle
+    }
+} catch { }
+
+# Diagnostic
+try {
+    $tag = if ($status.claude_hwnd) { "OK hwnd=$($status.claude_hwnd) pid=$($status.claude_pid)" } else { 'NOT-FOUND' }
+    Add-Content -Path 'C:\Users\hdcooper\Hardware-interface\logs\hooks-debug.log' `
+                -Value "$(Get-Date -Format 'o')`tCAPTURE`t$tag" -Encoding UTF8
 } catch { }
 
 $tmpPath = "$statusPath.tmp"

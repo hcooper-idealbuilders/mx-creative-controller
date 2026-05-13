@@ -40,21 +40,17 @@ public class MxWin32 {
 }
 "@
 
+$TERMINAL_NAMES = @('powershell','pwsh','WindowsTerminal','WindowsTerminalPreview','conhost','cmd','OpenConsole')
+
 function Get-HwndByPid {
     param([int]$ProcessId)
     if ($ProcessId -le 0) { return [IntPtr]::Zero }
     $proc = Get-Process -Id $ProcessId -ErrorAction SilentlyContinue
     if (-not $proc) { return [IntPtr]::Zero }
-    if ($proc.MainWindowHandle -ne [IntPtr]::Zero) { return $proc.MainWindowHandle }
-    # Walk up to a window-owning ancestor.
-    $walk = $ProcessId
-    for ($i = 0; $i -lt 6; $i++) {
-        $walk = (Get-CimInstance Win32_Process -Filter "ProcessId=$walk" -ErrorAction SilentlyContinue).ParentProcessId
-        if (-not $walk) { break }
-        $parent = Get-Process -Id $walk -ErrorAction SilentlyContinue
-        if ($parent -and $parent.MainWindowHandle -ne [IntPtr]::Zero) {
-            return $parent.MainWindowHandle
-        }
+    # Only accept the handle if the process is a known terminal — never
+    # return e.g. explorer.exe's window if a stale PID lands here.
+    if ($proc.MainWindowHandle -ne [IntPtr]::Zero -and $TERMINAL_NAMES -contains $proc.ProcessName) {
+        return $proc.MainWindowHandle
     }
     return [IntPtr]::Zero
 }
@@ -67,7 +63,7 @@ function Find-LikelyClaudeTerminal {
     param([string]$ProjectHint)
     $terminals = Get-Process -ErrorAction SilentlyContinue | Where-Object {
         $_.MainWindowHandle -ne [IntPtr]::Zero -and
-        $_.ProcessName -in @('powershell','pwsh','WindowsTerminal','conhost','cmd','windowsterminalpreview')
+        $TERMINAL_NAMES -contains $_.ProcessName
     }
     if ($ProjectHint) {
         $byProject = $terminals | Where-Object { $_.MainWindowTitle -match [regex]::Escape($ProjectHint) }
