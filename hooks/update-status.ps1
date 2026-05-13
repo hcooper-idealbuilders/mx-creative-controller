@@ -55,15 +55,22 @@ if ($payload.model) {
     $status.model = if ($payload.model.id) { $payload.model.id } else { [string]$payload.model }
 }
 
-if ($Event -eq 'SessionStart') {
-    # Walk parent-of-parent to capture the Claude process PID
-    # (the hook script's parent is the shell Claude Code spawned for us).
-    try {
-        $shell = (Get-CimInstance Win32_Process -Filter "ProcessId=$PID").ParentProcessId
-        $claude = (Get-CimInstance Win32_Process -Filter "ProcessId=$shell").ParentProcessId
-        if ($claude) { $status.claude_pid = [int]$claude }
-    } catch { }
-}
+# Walk up the process tree until we find a window-owning ancestor —
+# that's the host terminal running Claude Code (Windows Terminal,
+# ConHost, etc.). Done on every event so a missed SessionStart still
+# gets corrected on the next hook fire. Stops at the first window-owner.
+try {
+    $walk = $PID
+    for ($i = 0; $i -lt 8 -and $walk -gt 0; $i++) {
+        $walk = (Get-CimInstance Win32_Process -Filter "ProcessId=$walk" -ErrorAction SilentlyContinue).ParentProcessId
+        if (-not $walk) { break }
+        $cand = Get-Process -Id $walk -ErrorAction SilentlyContinue
+        if ($cand -and $cand.MainWindowHandle -ne [IntPtr]::Zero) {
+            $status.claude_pid = [int]$walk
+            break
+        }
+    }
+} catch { }
 
 $tmpPath = "$statusPath.tmp"
 $json = $status | ConvertTo-Json -Depth 10

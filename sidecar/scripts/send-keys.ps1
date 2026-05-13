@@ -46,16 +46,18 @@ function Get-TargetHwnd {
 }
 
 $hwnd = Get-TargetHwnd -ProcessId $ClaudePid
+
+# Safety: never blast keystrokes at an unknown foreground window.
+# If we can't confirm we have a real Claude Code terminal handle,
+# refuse rather than risk typing into Chrome, Outlook, etc.
 if ($hwnd -eq [IntPtr]::Zero) {
-    # Fallback: send to whichever window currently has focus.
-    $hwnd = [MxWin32]::GetForegroundWindow()
+    Write-Error "send-keys: no target window for ClaudePid=$ClaudePid; refusing to send '$Command' to foreground."
+    exit 2
 }
 
-if ($hwnd -ne [IntPtr]::Zero) {
-    [MxWin32]::ShowWindow($hwnd, 9) | Out-Null   # SW_RESTORE
-    [MxWin32]::SetForegroundWindow($hwnd) | Out-Null
-    Start-Sleep -Milliseconds 80
-}
+[MxWin32]::ShowWindow($hwnd, 9) | Out-Null   # SW_RESTORE
+[MxWin32]::SetForegroundWindow($hwnd) | Out-Null
+Start-Sleep -Milliseconds 80
 
 if ($keys) {
     [System.Windows.Forms.SendKeys]::SendWait($keys)
