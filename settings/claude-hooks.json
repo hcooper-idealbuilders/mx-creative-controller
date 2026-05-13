@@ -50,6 +50,26 @@
           }
         ]
       }
+    ],
+    "PreToolUse": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "powershell -NoProfile -ExecutionPolicy Bypass -File C:/Users/hdcooper/Hardware-interface/hooks/update-status.ps1 -Event PreToolUse"
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "powershell -NoProfile -ExecutionPolicy Bypass -File C:/Users/hdcooper/Hardware-interface/hooks/update-status.ps1 -Event PostToolUse"
+          }
+        ]
+      }
     ]
   }
 }

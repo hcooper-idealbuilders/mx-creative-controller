@@ -2,6 +2,13 @@ import { EventEmitter } from 'node:events'
 import WebSocket from 'ws'
 import type { SessionStatus, Command } from './state.js'
 
+export interface CommandResult {
+  sessionId: string
+  command: Command
+  success: boolean
+  error?: string
+}
+
 export class SidecarClient extends EventEmitter {
   private ws: WebSocket | null = null
   private backoffMs = 500
@@ -19,11 +26,16 @@ export class SidecarClient extends EventEmitter {
     })
     this.ws.on('message', (data) => {
       try {
-        const msg = JSON.parse(data.toString()) as
-          | { type: 'sessions'; sessions: SessionStatus[] }
-          | { type: string; [k: string]: unknown }
-        if (msg.type === 'sessions' && Array.isArray((msg as any).sessions)) {
-          this.emit('sessions', (msg as { sessions: SessionStatus[] }).sessions)
+        const msg = JSON.parse(data.toString()) as Record<string, unknown>
+        if (msg.type === 'sessions' && Array.isArray(msg.sessions)) {
+          this.emit('sessions', msg.sessions as SessionStatus[])
+        } else if (msg.type === 'command-result' && typeof msg.sessionId === 'string') {
+          this.emit('command-result', {
+            sessionId: msg.sessionId,
+            command:   msg.command as Command,
+            success:   !!msg.success,
+            error:     typeof msg.error === 'string' ? msg.error : undefined,
+          } satisfies CommandResult)
         }
       } catch {
         // ignore malformed

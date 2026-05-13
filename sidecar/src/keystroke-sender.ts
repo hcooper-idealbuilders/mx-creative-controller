@@ -14,14 +14,20 @@ export type KeystrokeCommand =
   | 'focus'      // focuses target window, no keys
 
 export class KeystrokeSender {
-  send(command: KeystrokeCommand, claudePid: number | null, projectHint?: string | null): Promise<void> {
+  send(
+    command: KeystrokeCommand,
+    claudePid: number | null,
+    claudeHwnd: number | null,
+    projectHint?: string | null,
+  ): Promise<void> {
     const args = [
       '-NoProfile',
       '-ExecutionPolicy', 'Bypass',
       '-File', SCRIPT,
       '-Command', command,
     ]
-    if (claudePid) args.push('-ClaudePid', String(claudePid))
+    if (claudeHwnd) args.push('-ClaudeHwnd', String(claudeHwnd))
+    if (claudePid)  args.push('-ClaudePid',  String(claudePid))
     if (projectHint) args.push('-ProjectHint', projectHint)
 
     return new Promise((resolve, reject) => {

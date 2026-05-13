@@ -18,7 +18,7 @@ afterEach(async () => {
 async function writeSession(id: string, first_seen: string, state: SessionState = 'idle') {
   const status: SessionStatus = {
     state, project: id, model: null, fast_mode: false,
-    session_id: id, claude_pid: null,
+    session_id: id, claude_pid: null, claude_hwnd: null,
     first_seen, last_event: 'SessionStart', last_updated: first_seen,
   }
   await writeFile(join(dir, `${id}.json`), JSON.stringify(status))
@@ -68,7 +68,7 @@ describe('SessionsWatcher', () => {
   it('strips UTF-8 BOM from session files (PowerShell quirk)', async () => {
     const status: SessionStatus = {
       state: 'idle', project: 'p', model: null, fast_mode: false,
-      session_id: 'bom', claude_pid: null,
+      session_id: 'bom', claude_pid: null, claude_hwnd: null,
       first_seen: '2026-05-13T10:00:00Z', last_event: 'SessionStart', last_updated: '2026-05-13T10:00:00Z',
     }
     await writeFile(join(dir, 'bom.json'), '\uFEFF' + JSON.stringify(status))

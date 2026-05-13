@@ -4,7 +4,7 @@ import type { SessionState, SessionStatus } from './state.js'
 
 const make = (id: string, state: SessionState): SessionStatus => ({
   state, project: id, model: null, fast_mode: false,
-  session_id: id, claude_pid: null,
+  session_id: id, claude_pid: null, claude_hwnd: null,
   first_seen: null, last_event: null, last_updated: null,
 })
 

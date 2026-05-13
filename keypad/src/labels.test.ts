@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { actionLabel, actionBg } from './labels.js'
+import { actionLabel, actionBg, isActionEnabled } from './labels.js'
 
 describe('actionLabel', () => {
   it('primary on waiting_input → Approve (smart Continue)', () => {
@@ -54,5 +54,32 @@ describe('actionBg', () => {
 
   it('null session → dark (matches the blank status key)', () => {
     expect(actionBg(null, 'primary')).toMatch(/^#0[a-f0-9]{5}$/i)
+  })
+})
+
+describe('isActionEnabled', () => {
+  it('primary disabled while thinking (avoids accidental stray prompts)', () => {
+    expect(isActionEnabled('thinking', 'primary')).toBe(false)
+  })
+
+  it('primary disabled while idle', () => {
+    expect(isActionEnabled('idle', 'primary')).toBe(false)
+  })
+
+  it('primary enabled on done, waiting_input, ended', () => {
+    expect(isActionEnabled('done', 'primary')).toBe(true)
+    expect(isActionEnabled('waiting_input', 'primary')).toBe(true)
+    expect(isActionEnabled('ended', 'primary')).toBe(true)
+  })
+
+  it('secondary (Focus / Dismiss) always enabled when a session exists', () => {
+    for (const s of ['idle', 'thinking', 'done', 'waiting_input', 'ended'] as const) {
+      expect(isActionEnabled(s, 'secondary')).toBe(true)
+    }
+  })
+
+  it('null session → both disabled', () => {
+    expect(isActionEnabled(null, 'primary')).toBe(false)
+    expect(isActionEnabled(null, 'secondary')).toBe(false)
   })
 })

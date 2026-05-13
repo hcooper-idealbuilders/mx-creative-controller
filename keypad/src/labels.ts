@@ -20,3 +20,16 @@ export function actionBg(state: SessionState | null, role: ActionRole): string {
   if (role === 'primary') return state === 'waiting_input' ? '#1f6f3a' : '#3a3a3a'
   return '#1f4a7a'
 }
+
+/**
+ * Whether the action button does something meaningful in the given state.
+ * When false, the keypad dims the button and ignores presses.
+ *
+ *   primary (Continue/Approve/Resume) is meaningful in done, waiting_input, ended
+ *   secondary (Focus/Dismiss) is always meaningful when a session exists
+ */
+export function isActionEnabled(state: SessionState | null, role: ActionRole): boolean {
+  if (state === null) return false
+  if (role === 'secondary') return true
+  return state === 'done' || state === 'waiting_input' || state === 'ended'
+}

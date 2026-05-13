@@ -5,7 +5,11 @@ param(
 
     [int]$ClaudePid,
 
-    # Optional disambiguator when ClaudePid can't be resolved (or is wrong).
+    # Direct window handle — preferred over PID when available (captured by
+    # the hook at session start). Pass 0 if unknown.
+    [int64]$ClaudeHwnd,
+
+    # Optional disambiguator when window can't be resolved by handle or PID.
     # The fallback terminal search prefers windows whose title contains this.
     [string]$ProjectHint
 )
@@ -95,8 +99,10 @@ function Force-Foreground {
     }
 }
 
-# Resolve the target window: PID first, then fall back to title search.
-$hwnd = Get-HwndByPid -ProcessId $ClaudePid
+# Resolve the target window: direct HWND first, then PID, then fallback search.
+$hwnd = [IntPtr]::Zero
+if ($ClaudeHwnd -gt 0) { $hwnd = [IntPtr]$ClaudeHwnd }
+if ($hwnd -eq [IntPtr]::Zero) { $hwnd = Get-HwndByPid -ProcessId $ClaudePid }
 if ($hwnd -eq [IntPtr]::Zero) { $hwnd = Find-LikelyClaudeTerminal -ProjectHint $ProjectHint }
 
 if ($hwnd -eq [IntPtr]::Zero) {

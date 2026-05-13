@@ -1,6 +1,6 @@
 param(
     [Parameter(Mandatory=$true)]
-    [ValidateSet('SessionStart','UserPromptSubmit','Stop','Notification','SessionEnd')]
+    [ValidateSet('SessionStart','UserPromptSubmit','Stop','Notification','SessionEnd','PreToolUse','PostToolUse')]
     [string]$Event
 )
 
@@ -34,6 +34,7 @@ $status = if (Test-Path $statusPath) {
         fast_mode     = $false
         session_id    = $sessionId
         claude_pid    = $null
+        claude_hwnd   = $null
         first_seen    = (Get-Date).ToUniversalTime().ToString('o')
         last_event    = $null
         last_updated  = $null
@@ -46,6 +47,11 @@ $status.state = switch ($Event) {
     'Stop'             { 'done' }
     'Notification'     { 'waiting_input' }
     'SessionEnd'       { 'ended' }
+    # Tool use means Claude is actively working, even if a Notification
+    # set us to waiting_input moments ago (e.g. an auto-approved permission
+    # prompt left no follow-up signal). Flip back to thinking.
+    'PreToolUse'       { 'thinking' }
+    'PostToolUse'      { 'thinking' }
 }
 $status.last_event   = $Event
 $status.last_updated = (Get-Date).ToUniversalTime().ToString('o')
@@ -73,7 +79,10 @@ try {
         if ($cand -and
             $cand.MainWindowHandle -ne [IntPtr]::Zero -and
             $TERMINAL_NAMES -contains $cand.ProcessName) {
-            $status.claude_pid = [int]$walk
+            $status.claude_pid  = [int]$walk
+            # Capture the HWND too — robust against PID lookups failing later
+            # (e.g. WMI hiccups) and gives send-keys.ps1 a direct target.
+            $status.claude_hwnd = [int64]$cand.MainWindowHandle
             break
         }
     }

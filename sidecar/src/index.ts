@@ -40,9 +40,18 @@ server.on('command', async (cmd: CommandMessage) => {
   }
   console.log(`[mx-sidecar] ${cmd.sessionId.slice(0, 8)}… state=${session.state} → ${result.keystroke}`)
   try {
-    await sender.send(result.keystroke, session.claude_pid, session.project)
+    await sender.send(result.keystroke, session.claude_pid, session.claude_hwnd, session.project)
+    server.broadcast({
+      type: 'command-result',
+      sessionId: cmd.sessionId, command: cmd.command, success: true,
+    })
   } catch (err) {
     console.error('[mx-sidecar] send failed:', err)
+    server.broadcast({
+      type: 'command-result',
+      sessionId: cmd.sessionId, command: cmd.command, success: false,
+      error: (err as Error).message,
+    })
   }
 })
 

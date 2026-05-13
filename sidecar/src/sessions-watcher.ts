@@ -12,6 +12,8 @@ export interface SessionStatus {
   fast_mode: boolean
   session_id: string
   claude_pid: number | null
+  /** Captured at hook time; preferred over claude_pid when sending keystrokes. */
+  claude_hwnd: number | null
   first_seen: string | null
   last_event: string | null
   last_updated: string | null
