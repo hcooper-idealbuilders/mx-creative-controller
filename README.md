@@ -1,69 +1,103 @@
 # mx-creative-controller
 
-A custom hardware-feedback controller for [Claude Code](https://claude.com/claude-code), built on top of the Logitech MX Creative Console.
+A hardware controller for [Claude Code](https://claude.com/claude-code) built on top of the Logitech MX Creative Console. Live status from up to three concurrent Claude sessions across the keypad, plus hardware buttons for Continue / Approve / Focus / Resume / Dismiss — all working *while Logi Options+ is still running and managing the dialpad*.
 
-The goal: live status on the keypad LCDs (current project, model, "Claude is thinking", "Claude is done"), and hardware response keys that work even when the terminal isn't the focused window.
+This repo is also the public journal of getting there — including the dead ends. See [`docs/journal/`](docs/journal/) for the story.
 
-This repo is also the public journal of getting there — including the dead ends.
+## Layout
 
-## Status
+```
+                       ╔═══════════╤═══════════╤═══════════╗
+row 0 — status         ║   ✦ S₀    │   ✦ S₁    │   ✦ S₂    ║
+row 1 — primary        ║ Continue  │ Continue  │ Continue  ║
+row 2 — secondary      ║   Focus   │   Focus   │   Focus   ║
+                       ╚═══════════╧═══════════╧═══════════╝
+```
 
-Work-in-progress.
+Each column is one Claude session, assigned FIFO. The status mark in row 0 is tinted by session state:
 
-| Half | State |
-|---|---|
-| **Sidecar** — Claude Code hooks → status JSON → Node WebSocket service → keystroke sender into PowerShell | ✅ Working end-to-end |
-| **Keypad** — drive the LCDs and read key events from the MX Creative Console | ⚠️ Partial. We can paint pixels, but the device firmware reverts to a default after ~0.5s without a complete HID++ claim handshake we're still reverse-engineering. |
+| State           | Mark                   | Trigger |
+|-----------------|------------------------|---------|
+| `idle`          | gray Claude mark       | SessionStart |
+| `thinking`      | **two pulsing dots**   | UserPromptSubmit |
+| `waiting_input` | orange Claude mark     | Notification |
+| `done`          | green Claude mark      | Stop |
+| `ended`         | red Claude mark        | SessionEnd |
 
-If you also got stuck on `Cannot write to hid device` with `@logitech-mx-creative-console/node`, see [`docs/journal/2026-05-13-from-sdk-to-col03.md`](docs/journal/2026-05-13-from-sdk-to-col03.md) — the lib opens the *wrong* HID collection by default. Writes succeed on Col03 (vendor page `0xff43`, usage `0x1a10`).
+Row 1 / row 2 labels swap with state:
+
+- alive: `Continue` (smart — sends `y⏎` on `waiting_input`, otherwise `continue⏎`) / `Focus`
+- ended: `Resume` (sends `/resume⏎`) / `Dismiss` (frees the column)
 
 ## Architecture
 
 ```
 Claude Code (PowerShell)
-  └─ hooks (SessionStart / UserPromptSubmit / Stop / Notification)
-       └─ writes  ~/.claude/mx-console-status.json
+  └─ hooks  SessionStart / UserPromptSubmit / Stop / Notification / SessionEnd
+       └─ per-session JSON in  ~/.claude/mx-sessions/<session_id>.json
                        │
-                       ▼  (fs.watch)
-                 sidecar/ (Node, TS)
+                       ▼  (fs.watch on the directory)
+                 sidecar/  (Node, TypeScript)
                   ├─ WebSocket server  ws://127.0.0.1:9876
+                  │     broadcasts { type: "sessions", sessions: [...] }
                   └─ keystroke sender → PowerShell SendKeys → Claude window
                        ▲
                        │
-                  [keypad controller — TBD]
-                       └─ MX Creative Console (LCDs + key events)
+                  keypad/  (Node, TypeScript)
+                  ├─ paints 9 LCDs per session state (Canvas + JPEG)
+                  ├─ reads button presses, dispatches by column
+                  └─ 1Hz refresh reclaims from Logi Options+ on app-focus changes
+                       │
+                       ▼
+              MX Creative Console keypad
 ```
+
+## Install (Windows)
+
+Prereqs: **Logi Options+** (for the device drivers), **Node 22+** (the unofficial HID lib needs prebuilt binaries — Node 24 also works).
+
+```powershell
+# Clone
+git clone https://github.com/hcooper-idealbuilders/mx-creative-controller.git
+cd mx-creative-controller
+
+# Merge settings/claude-hooks.json into ~/.claude/settings.json
+#   (open both files, copy the "hooks" block over — or use the
+#    update-config Claude Code skill to merge for you)
+
+# Install + register both services as Windows Scheduled Tasks
+.\install.ps1                # builds, registers; auto-start on next logon
+.\install.ps1 -StartNow      # also kill any dev processes and start now
+```
+
+The installer:
+- Self-elevates via UAC.
+- Runs `npm install && npm run build` for `sidecar/` and `keypad/`.
+- Registers two Scheduled Tasks (`mx-sidecar` and `mx-keypad`) that start at user logon, restart on failure, and run hidden.
+- Logs to `logs/sidecar.log` and `logs/keypad.log`.
+
+To uninstall: `.\uninstall.ps1` (stops + unregisters the tasks; leaves source/build/logs in place).
+
+## Try it
+
+After install:
+1. Start any Claude Code session in PowerShell. Watch column 0 light up with your project name.
+2. Submit a prompt — column 0's mark turns into two pulsing dots.
+3. When Claude finishes — green mark + the `Continue` and `Focus` buttons light up.
+4. Open a second Claude Code in another terminal — it appears in column 1.
 
 ## Repo map
 
-- `sidecar/` — Node service. Watches the status file, exposes WebSocket events, sends keystrokes to the Claude Code window.
-- `hooks/` — PowerShell hook script. Claude Code invokes it on SessionStart / UserPromptSubmit / Stop / Notification.
-- `settings/` — JSON snippet to merge into `~/.claude/settings.json`.
+- `sidecar/` — Node service. Watches `~/.claude/mx-sessions/`, exposes WebSocket, sends keystrokes.
+- `keypad/` — Node service. Drives the LCDs (Col03), reads button events (Col01/Col02), dispatches commands.
+- `hooks/update-status.ps1` — Claude Code hook script.
+- `settings/claude-hooks.json` — hook config snippet to merge into `~/.claude/settings.json`.
+- `install.ps1` / `uninstall.ps1` — Scheduled-Task installer.
 - `experiments/` — diagnostic scripts written during reverse-engineering. See `experiments/README.md`.
-- `captures/` — USB packet captures (USBPcap pcap files) + derived data. See `captures/README.md`.
-- `docs/` — protocol notes, architecture, and the dated session journal.
-- `plugin/` — the dead-end Logi Actions SDK attempt. Kept for narrative context.
+- `captures/` — USB packet captures + derived data. See `captures/README.md`.
+- `docs/` — `protocol.md`, `architecture.md`, and the dated session `journal/`.
+- `plugin/` — the dead-end Logi Actions SDK attempt. Kept as narrative context.
 
-## Try the sidecar (Windows)
+## The discovery worth sharing
 
-```sh
-# 1. Wire the hooks into ~/.claude/settings.json
-#    (or merge settings/claude-hooks.json manually)
-
-# 2. Start the sidecar
-cd sidecar
-npm install
-npm run dev
-
-# 3. Start a Claude Code session in PowerShell
-#    Watch ~/.claude/mx-console-status.json update as you chat.
-
-# 4. (Optional) Watch live with the smoke client
-node smoke.mjs
-```
-
-Hardware integration is gated on the protocol reverse-engineering — see the journal for the latest.
-
-## The story
-
-For the chronological writeup of how we got here, see [`docs/journal/`](docs/journal/).
+If you hit `Cannot write to hid device` with `@logitech-mx-creative-console/node`, the lib opens the wrong HID collection by default. The MX Creative Console exposes report IDs `0x11` / `0x13` / `0x14` on **three separate HID collections** (`Col01` / `Col02` / `Col03`, vendor page `0xff43`, usages `0x1a02` / `0x1a08` / `0x1a10`). The lib only opens one handle, so it always fails on at least one report type. See [`docs/protocol.md`](docs/protocol.md) and the journal for the full story.
