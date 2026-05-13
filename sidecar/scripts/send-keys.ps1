@@ -1,6 +1,6 @@
 param(
     [Parameter(Mandatory=$true)]
-    [ValidateSet('continue','yes','no','interrupt','focus')]
+    [ValidateSet('continue','approve','reject','interrupt','resume','focus')]
     [string]$Command,
 
     [int]$ClaudePid
@@ -10,9 +10,10 @@ $ErrorActionPreference = 'Stop'
 
 $keys = switch ($Command) {
     'continue'  { 'continue{ENTER}' }
-    'yes'       { 'y{ENTER}' }
-    'no'        { 'n{ENTER}' }
+    'approve'   { 'y{ENTER}' }
+    'reject'    { 'n{ENTER}' }
     'interrupt' { '{ESC}' }
+    'resume'    { '/resume{ENTER}' }
     'focus'     { $null }
 }
 

@@ -1,12 +1,12 @@
 {
-  "_comment": "Merge the 'hooks' block into ~/.claude/settings.json. Path values assume the repo lives at C:/Users/hdcooper/Hardware-interface.",
+  "_comment": "Merge the 'hooks' block into ~/.claude/settings.json. Uses forward slashes so the path survives shell quoting.",
   "hooks": {
     "SessionStart": [
       {
         "hooks": [
           {
             "type": "command",
-            "command": "powershell -NoProfile -ExecutionPolicy Bypass -File C:\\Users\\hdcooper\\Hardware-interface\\hooks\\update-status.ps1 -Event SessionStart"
+            "command": "powershell -NoProfile -ExecutionPolicy Bypass -File C:/Users/hdcooper/Hardware-interface/hooks/update-status.ps1 -Event SessionStart"
           }
         ]
       }
@@ -16,7 +16,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "powershell -NoProfile -ExecutionPolicy Bypass -File C:\\Users\\hdcooper\\Hardware-interface\\hooks\\update-status.ps1 -Event UserPromptSubmit"
+            "command": "powershell -NoProfile -ExecutionPolicy Bypass -File C:/Users/hdcooper/Hardware-interface/hooks/update-status.ps1 -Event UserPromptSubmit"
           }
         ]
       }
@@ -26,7 +26,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "powershell -NoProfile -ExecutionPolicy Bypass -File C:\\Users\\hdcooper\\Hardware-interface\\hooks\\update-status.ps1 -Event Stop"
+            "command": "powershell -NoProfile -ExecutionPolicy Bypass -File C:/Users/hdcooper/Hardware-interface/hooks/update-status.ps1 -Event Stop"
           }
         ]
       }
@@ -36,7 +36,17 @@
         "hooks": [
           {
             "type": "command",
-            "command": "powershell -NoProfile -ExecutionPolicy Bypass -File C:\\Users\\hdcooper\\Hardware-interface\\hooks\\update-status.ps1 -Event Notification"
+            "command": "powershell -NoProfile -ExecutionPolicy Bypass -File C:/Users/hdcooper/Hardware-interface/hooks/update-status.ps1 -Event Notification"
+          }
+        ]
+      }
+    ],
+    "SessionEnd": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "powershell -NoProfile -ExecutionPolicy Bypass -File C:/Users/hdcooper/Hardware-interface/hooks/update-status.ps1 -Event SessionEnd"
           }
         ]
       }

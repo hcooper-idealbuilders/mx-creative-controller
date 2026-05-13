@@ -3,13 +3,17 @@ import { WebSocketServer, WebSocket } from 'ws'
 
 type Send = (msg: unknown) => void
 
+export interface CommandMessage {
+  type: 'command'
+  sessionId: string
+  command: string
+}
+
 export class IpcServer extends EventEmitter {
   private wss: WebSocketServer | null = null
   private clients = new Set<WebSocket>()
 
-  constructor(private port: number) {
-    super()
-  }
+  constructor(private port: number) { super() }
 
   start(): void {
     this.wss = new WebSocketServer({ host: '127.0.0.1', port: this.port })
@@ -21,9 +25,9 @@ export class IpcServer extends EventEmitter {
       this.emit('connect', sendOne)
       ws.on('message', (data) => {
         try {
-          const msg = JSON.parse(data.toString()) as { type?: string; command?: string }
-          if (msg.type === 'command' && msg.command) {
-            this.emit('command', msg.command)
+          const msg = JSON.parse(data.toString()) as Partial<CommandMessage>
+          if (msg.type === 'command' && typeof msg.sessionId === 'string' && typeof msg.command === 'string') {
+            this.emit('command', msg as CommandMessage)
           }
         } catch {
           // ignore malformed

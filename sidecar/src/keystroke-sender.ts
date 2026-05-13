@@ -5,10 +5,16 @@ import { dirname, join } from 'node:path'
 const here = dirname(fileURLToPath(import.meta.url))
 const SCRIPT = join(here, '..', 'scripts', 'send-keys.ps1')
 
-export type Command = 'continue' | 'yes' | 'no' | 'interrupt' | 'focus'
+export type KeystrokeCommand =
+  | 'continue'   // sends 'continue⏎'
+  | 'approve'    // sends 'y⏎'
+  | 'reject'     // sends 'n⏎'
+  | 'interrupt'  // sends Esc
+  | 'resume'     // sends '/resume⏎'
+  | 'focus'      // focuses target window, no keys
 
 export class KeystrokeSender {
-  send(command: Command, claudePid: number | null): Promise<void> {
+  send(command: KeystrokeCommand, claudePid: number | null): Promise<void> {
     const args = [
       '-NoProfile',
       '-ExecutionPolicy', 'Bypass',

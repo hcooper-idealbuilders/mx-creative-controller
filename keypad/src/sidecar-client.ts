@@ -1,18 +1,13 @@
-// WebSocket client to the sidecar. Reconnects forever with backoff.
 import { EventEmitter } from 'node:events'
 import WebSocket from 'ws'
-import type { Status, Command } from './state.js'
+import type { SessionStatus, Command } from './state.js'
 
 export class SidecarClient extends EventEmitter {
   private ws: WebSocket | null = null
-  private url: string
   private backoffMs = 500
   private closed = false
 
-  constructor(url: string) {
-    super()
-    this.url = url
-  }
+  constructor(private url: string) { super() }
 
   connect(): void {
     if (this.closed) return
@@ -25,9 +20,11 @@ export class SidecarClient extends EventEmitter {
     this.ws.on('message', (data) => {
       try {
         const msg = JSON.parse(data.toString()) as
-          | { type: 'status'; status: Status }
+          | { type: 'sessions'; sessions: SessionStatus[] }
           | { type: string; [k: string]: unknown }
-        if (msg.type === 'status') this.emit('status', msg.status)
+        if (msg.type === 'sessions' && Array.isArray((msg as any).sessions)) {
+          this.emit('sessions', (msg as { sessions: SessionStatus[] }).sessions)
+        }
       } catch {
         // ignore malformed
       }
@@ -40,12 +37,12 @@ export class SidecarClient extends EventEmitter {
       setTimeout(() => this.connect(), wait)
     }
     this.ws.on('close', reconnect)
-    this.ws.on('error', () => {/* close handler will reconnect */})
+    this.ws.on('error', () => {/* close handler reconnects */})
   }
 
-  sendCommand(command: Command): void {
+  sendCommand(sessionId: string, command: Command): void {
     if (this.ws?.readyState === WebSocket.OPEN) {
-      this.ws.send(JSON.stringify({ type: 'command', command }))
+      this.ws.send(JSON.stringify({ type: 'command', sessionId, command }))
     }
   }
 
