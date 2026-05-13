@@ -28,13 +28,13 @@ public class MxWin32 {
 "@
 
 function Get-TargetHwnd {
-    param([int]$Pid)
-    if ($Pid -le 0) { return [IntPtr]::Zero }
-    $proc = Get-Process -Id $Pid -ErrorAction SilentlyContinue
+    param([int]$ProcessId)
+    if ($ProcessId -le 0) { return [IntPtr]::Zero }
+    $proc = Get-Process -Id $ProcessId -ErrorAction SilentlyContinue
     if (-not $proc) { return [IntPtr]::Zero }
     if ($proc.MainWindowHandle -ne [IntPtr]::Zero) { return $proc.MainWindowHandle }
     # Claude Code's TUI may not own a window — walk up to the hosting terminal.
-    $parentId = (Get-CimInstance Win32_Process -Filter "ProcessId=$Pid").ParentProcessId
+    $parentId = (Get-CimInstance Win32_Process -Filter "ProcessId=$ProcessId").ParentProcessId
     if ($parentId) {
         $parent = Get-Process -Id $parentId -ErrorAction SilentlyContinue
         if ($parent -and $parent.MainWindowHandle -ne [IntPtr]::Zero) {
@@ -44,7 +44,7 @@ function Get-TargetHwnd {
     return [IntPtr]::Zero
 }
 
-$hwnd = Get-TargetHwnd -Pid $ClaudePid
+$hwnd = Get-TargetHwnd -ProcessId $ClaudePid
 if ($hwnd -eq [IntPtr]::Zero) {
     # Fallback: send to whichever window currently has focus.
     $hwnd = [MxWin32]::GetForegroundWindow()
