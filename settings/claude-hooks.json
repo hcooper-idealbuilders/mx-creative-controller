@@ -1,0 +1,45 @@
+{
+  "_comment": "Merge the 'hooks' block into ~/.claude/settings.json. Path values assume the repo lives at C:/Users/hdcooper/Hardware-interface.",
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "powershell -NoProfile -ExecutionPolicy Bypass -File C:\\Users\\hdcooper\\Hardware-interface\\hooks\\update-status.ps1 -Event SessionStart"
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "powershell -NoProfile -ExecutionPolicy Bypass -File C:\\Users\\hdcooper\\Hardware-interface\\hooks\\update-status.ps1 -Event UserPromptSubmit"
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "powershell -NoProfile -ExecutionPolicy Bypass -File C:\\Users\\hdcooper\\Hardware-interface\\hooks\\update-status.ps1 -Event Stop"
+          }
+        ]
+      }
+    ],
+    "Notification": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "powershell -NoProfile -ExecutionPolicy Bypass -File C:\\Users\\hdcooper\\Hardware-interface\\hooks\\update-status.ps1 -Event Notification"
+          }
+        ]
+      }
+    ]
+  }
+}
