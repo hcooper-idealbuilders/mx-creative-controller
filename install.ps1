@@ -26,8 +26,9 @@ $LogsDir = Join-Path $Root 'logs'
 if (-not (Test-Path $LogsDir)) { New-Item -ItemType Directory -Path $LogsDir | Out-Null }
 
 # Resolve node.exe (must be on PATH or in nvm's currently-active version).
-$nodeExe = (Get-Command node.exe -ErrorAction SilentlyContinue)?.Source
-if (-not $nodeExe) { throw 'node.exe not found on PATH. Install Node 22 LTS or newer and re-run.' }
+$nodeCmd = Get-Command node.exe -ErrorAction SilentlyContinue
+if (-not $nodeCmd) { throw 'node.exe not found on PATH. Install Node 22 LTS or newer and re-run.' }
+$nodeExe = $nodeCmd.Source
 Write-Host "node: $nodeExe"
 
 function Build-Package($name) {
@@ -46,15 +47,21 @@ function Build-Package($name) {
 Build-Package 'sidecar'
 Build-Package 'keypad'
 
-function Register-Task($name, $workdir, $logfile) {
+function Register-Task($name, $workdir, $logfile, $launcherPath) {
     Write-Host ""
     Write-Host "==> Registering Scheduled Task: $name" -ForegroundColor Cyan
 
-    # Hidden-window launcher: pwsh -WindowStyle Hidden, set cwd, run node, redirect logs.
-    $command = "Set-Location -LiteralPath `"$workdir`"; & `"$nodeExe`" dist\index.js *>> `"$logfile`""
+    # Write a per-task launcher script. Easier to escape than a giant -Command line.
+    $launcher = @"
+`$ErrorActionPreference = 'Stop'
+Set-Location -LiteralPath '$workdir'
+& '$nodeExe' 'dist\index.js' *>> '$logfile'
+"@
+    Set-Content -Path $launcherPath -Value $launcher -Encoding UTF8
+
     $action = New-ScheduledTaskAction `
         -Execute 'powershell.exe' `
-        -Argument "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -Command `"$command`""
+        -Argument "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$launcherPath`""
 
     $trigger = New-ScheduledTaskTrigger -AtLogOn -User $env:USERNAME
 
@@ -75,11 +82,16 @@ function Register-Task($name, $workdir, $logfile) {
     Write-Host "    registered."
 }
 
-$sidecarLog = Join-Path $LogsDir 'sidecar.log'
-$keypadLog  = Join-Path $LogsDir 'keypad.log'
+$LaunchersDir = Join-Path $Root 'launchers'
+if (-not (Test-Path $LaunchersDir)) { New-Item -ItemType Directory -Path $LaunchersDir | Out-Null }
 
-Register-Task 'mx-sidecar' (Join-Path $Root 'sidecar') $sidecarLog
-Register-Task 'mx-keypad'  (Join-Path $Root 'keypad')  $keypadLog
+$sidecarLog      = Join-Path $LogsDir 'sidecar.log'
+$keypadLog       = Join-Path $LogsDir 'keypad.log'
+$sidecarLauncher = Join-Path $LaunchersDir 'run-sidecar.ps1'
+$keypadLauncher  = Join-Path $LaunchersDir 'run-keypad.ps1'
+
+Register-Task 'mx-sidecar' (Join-Path $Root 'sidecar') $sidecarLog $sidecarLauncher
+Register-Task 'mx-keypad'  (Join-Path $Root 'keypad')  $keypadLog  $keypadLauncher
 
 Write-Host ""
 Write-Host 'Installed.' -ForegroundColor Green
