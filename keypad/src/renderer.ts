@@ -6,6 +6,7 @@
 // All sessions render their own column. Empty columns render dark.
 import { Canvas, type SKRSContext2D, createCanvas } from '@napi-rs/canvas'
 import { type SessionStatus, type SessionState, STATE_COLOR } from './state.js'
+import { actionLabel, actionBg, type ActionRole } from './labels.js'
 
 const KEY = 118
 
@@ -97,33 +98,19 @@ export function renderStatusKey(session: SessionStatus | null): Uint8Array {
 
 export function renderActionKey(
   session: SessionStatus | null,
-  role: 'primary' | 'secondary',
+  role: ActionRole,
 ): Uint8Array {
-  if (!session) return toRgba(makeCanvas('#0a0a0a').canvas)
-
-  let label = ''
-  let bg = '#181818'
-  let fg = '#ffffff'
-
-  if (session.state === 'ended') {
-    label = role === 'primary' ? 'Resume' : 'Dismiss'
-    bg = role === 'primary' ? '#244a8c' : '#5a2727'
-  } else {
-    if (role === 'primary') {
-      label = session.state === 'waiting_input' ? 'Approve' : 'Continue'
-      bg = session.state === 'waiting_input' ? '#1f6f3a' : '#3a3a3a'
-    } else {
-      label = 'Focus'
-      bg = '#1f4a7a'
-    }
-  }
-
+  const state = session?.state ?? null
+  const label = actionLabel(state, role)
+  const bg    = actionBg(state, role)
   const { canvas, ctx } = makeCanvas(bg)
-  ctx.fillStyle = fg
-  ctx.textAlign = 'center'
-  ctx.textBaseline = 'middle'
-  ctx.font = `700 22px Inter, "Segoe UI", system-ui, sans-serif`
-  ctx.fillText(label, KEY / 2, KEY / 2)
+  if (label) {
+    ctx.fillStyle = '#ffffff'
+    ctx.textAlign = 'center'
+    ctx.textBaseline = 'middle'
+    ctx.font = `700 22px Inter, "Segoe UI", system-ui, sans-serif`
+    ctx.fillText(label, KEY / 2, KEY / 2)
+  }
   return toRgba(canvas)
 }
 

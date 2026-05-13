@@ -7,6 +7,7 @@
 import { MxKeypad, type PressEvent } from './device.js'
 import { SidecarClient } from './sidecar-client.js'
 import { renderLayout, needsAnimation } from './renderer.js'
+import { applyOptimisticUpdate } from './optimistic.js'
 import type { Command, SessionStatus } from './state.js'
 
 const SIDECAR_URL = process.env.MX_SIDECAR_URL ?? 'ws://127.0.0.1:9876'
@@ -74,6 +75,11 @@ keypad.on('press', (evt: PressEvent) => {
   if (!command) return
   console.log(`[keypad] col ${col} (${session.session_id.slice(0, 8)}…) state=${session.state} → ${command}`)
   sidecar.sendCommand(session.session_id, command)
+  // Optimistic local update — flip to thinking immediately so the LCD
+  // shows feedback instantly. Next real sessions broadcast will correct
+  // if Claude Code ends up in a different state.
+  currentSessions = applyOptimisticUpdate(currentSessions, session.session_id, command)
+  void repaint()
 })
 
 // Refresh tick. When any session is `thinking`, we paint faster so the dots

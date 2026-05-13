@@ -51,11 +51,21 @@ function Register-Task($name, $workdir, $logfile, $launcherPath) {
     Write-Host ""
     Write-Host "==> Registering Scheduled Task: $name" -ForegroundColor Cyan
 
-    # Write a per-task launcher script. Easier to escape than a giant -Command line.
+    # Per-task launcher. We use Start-Process -RedirectStandardOutput rather
+    # than PowerShell's *>> operator because the latter takes an exclusive
+    # write lock on the log file for the entire lifetime of the PowerShell
+    # process — and that handle leaks if node crashes, blocking the next
+    # restart attempt.
+    $logErr = $logfile -replace '\.log$', '.err'
     $launcher = @"
 `$ErrorActionPreference = 'Stop'
-Set-Location -LiteralPath '$workdir'
-& '$nodeExe' 'dist\index.js' *>> '$logfile'
+`$proc = Start-Process -FilePath '$nodeExe' ``
+    -ArgumentList 'dist\index.js' ``
+    -WorkingDirectory '$workdir' ``
+    -RedirectStandardOutput '$logfile' ``
+    -RedirectStandardError  '$logErr' ``
+    -NoNewWindow -PassThru -Wait
+exit `$proc.ExitCode
 "@
     Set-Content -Path $launcherPath -Value $launcher -Encoding UTF8
 

@@ -1,6 +1,7 @@
 import { SessionsWatcher } from './sessions-watcher.js'
 import { IpcServer, type CommandMessage } from './ipc-server.js'
-import { KeystrokeSender, type KeystrokeCommand } from './keystroke-sender.js'
+import { KeystrokeSender } from './keystroke-sender.js'
+import { routeCommand } from './routing.js'
 
 const SESSIONS_DIR =
   process.env.MX_SESSIONS_DIR ??
@@ -27,34 +28,19 @@ server.on('command', async (cmd: CommandMessage) => {
     console.error(`[mx-sidecar] command for unknown session ${cmd.sessionId}: ${cmd.command}`)
     return
   }
-
-  // Dismiss: just delete the session file. No keystrokes.
-  if (cmd.command === 'dismiss') {
+  const result = routeCommand(cmd.command, session.state)
+  if (result.kind === 'unknown') {
+    console.error(`[mx-sidecar] unknown command: ${cmd.command}`)
+    return
+  }
+  if (result.kind === 'dismiss') {
     console.log(`[mx-sidecar] dismiss session ${cmd.sessionId}`)
     await watcher.dismiss(cmd.sessionId)
     return
   }
-
-  // Map keypad command to keystroke command. "continue" is smart:
-  // on waiting_input it sends `y⏎`, otherwise plain `continue⏎`.
-  let keystroke: KeystrokeCommand | null = null
-  switch (cmd.command) {
-    case 'continue':
-      keystroke = session.state === 'waiting_input' ? 'approve' : 'continue'
-      break
-    case 'resume':
-      keystroke = 'resume'
-      break
-    case 'focus':
-      keystroke = 'focus'
-      break
-    default:
-      console.error(`[mx-sidecar] unknown command: ${cmd.command}`)
-      return
-  }
-  console.log(`[mx-sidecar] ${cmd.sessionId.slice(0, 8)}… state=${session.state} → ${keystroke}`)
+  console.log(`[mx-sidecar] ${cmd.sessionId.slice(0, 8)}… state=${session.state} → ${result.keystroke}`)
   try {
-    await sender.send(keystroke, session.claude_pid)
+    await sender.send(result.keystroke, session.claude_pid)
   } catch (err) {
     console.error('[mx-sidecar] send failed:', err)
   }
