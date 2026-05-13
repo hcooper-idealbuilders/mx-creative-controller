@@ -40,7 +40,7 @@ server.on('command', async (cmd: CommandMessage) => {
   }
   console.log(`[mx-sidecar] ${cmd.sessionId.slice(0, 8)}… state=${session.state} → ${result.keystroke}`)
   try {
-    await sender.send(result.keystroke, session.claude_pid)
+    await sender.send(result.keystroke, session.claude_pid, session.project)
   } catch (err) {
     console.error('[mx-sidecar] send failed:', err)
   }

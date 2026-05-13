@@ -55,17 +55,24 @@ if ($payload.model) {
     $status.model = if ($payload.model.id) { $payload.model.id } else { [string]$payload.model }
 }
 
-# Walk up the process tree until we find a window-owning ancestor —
-# that's the host terminal running Claude Code (Windows Terminal,
-# ConHost, etc.). Done on every event so a missed SessionStart still
-# gets corrected on the next hook fire. Stops at the first window-owner.
+# Walk up the process tree until we find a *terminal* ancestor (one of
+# powershell / pwsh / WindowsTerminal / conhost / cmd) that owns a window —
+# that's the host running Claude Code. Done on every event so a missed
+# SessionStart still gets corrected on the next hook fire.
+#
+# We exclude generic window-owners like explorer.exe because every desktop
+# process eventually descends from explorer; accepting the first window
+# ancestor would mis-capture it as the "Claude" PID.
+$TERMINAL_NAMES = @('powershell','pwsh','WindowsTerminal','conhost','cmd','windowsterminalpreview')
 try {
     $walk = $PID
     for ($i = 0; $i -lt 8 -and $walk -gt 0; $i++) {
         $walk = (Get-CimInstance Win32_Process -Filter "ProcessId=$walk" -ErrorAction SilentlyContinue).ParentProcessId
         if (-not $walk) { break }
         $cand = Get-Process -Id $walk -ErrorAction SilentlyContinue
-        if ($cand -and $cand.MainWindowHandle -ne [IntPtr]::Zero) {
+        if ($cand -and
+            $cand.MainWindowHandle -ne [IntPtr]::Zero -and
+            $TERMINAL_NAMES -contains $cand.ProcessName) {
             $status.claude_pid = [int]$walk
             break
         }

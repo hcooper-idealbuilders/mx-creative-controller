@@ -3,7 +3,11 @@ param(
     [ValidateSet('continue','approve','reject','interrupt','resume','focus')]
     [string]$Command,
 
-    [int]$ClaudePid
+    [int]$ClaudePid,
+
+    # Optional disambiguator when ClaudePid can't be resolved (or is wrong).
+    # The fallback terminal search prefers windows whose title contains this.
+    [string]$ProjectHint
 )
 
 $ErrorActionPreference = 'Stop'
@@ -52,11 +56,18 @@ function Get-HwndByPid {
 }
 
 # Fallback: only consider processes that are obviously terminals,
-# preferring one whose window title looks like Claude Code.
+# preferring one whose window title matches the session's project name
+# (so two Claude Code sessions in two terminals can be told apart),
+# then falling back to any "Claude"-titled terminal.
 function Find-LikelyClaudeTerminal {
+    param([string]$ProjectHint)
     $terminals = Get-Process -ErrorAction SilentlyContinue | Where-Object {
         $_.MainWindowHandle -ne [IntPtr]::Zero -and
-        $_.ProcessName -in @('powershell','pwsh','WindowsTerminal','conhost','cmd')
+        $_.ProcessName -in @('powershell','pwsh','WindowsTerminal','conhost','cmd','windowsterminalpreview')
+    }
+    if ($ProjectHint) {
+        $byProject = $terminals | Where-Object { $_.MainWindowTitle -match [regex]::Escape($ProjectHint) }
+        if ($byProject) { return $byProject[0].MainWindowHandle }
     }
     $byClaude = $terminals | Where-Object { $_.MainWindowTitle -match 'Claude' }
     if ($byClaude) { return $byClaude[0].MainWindowHandle }
@@ -84,9 +95,9 @@ function Force-Foreground {
     }
 }
 
-# Resolve the target window: PID first, then fall back to "looks like a Claude terminal."
+# Resolve the target window: PID first, then fall back to title search.
 $hwnd = Get-HwndByPid -ProcessId $ClaudePid
-if ($hwnd -eq [IntPtr]::Zero) { $hwnd = Find-LikelyClaudeTerminal }
+if ($hwnd -eq [IntPtr]::Zero) { $hwnd = Find-LikelyClaudeTerminal -ProjectHint $ProjectHint }
 
 if ($hwnd -eq [IntPtr]::Zero) {
     Write-Error "send-keys: no Claude terminal found (ClaudePid=$ClaudePid). Refusing to send '$Command'."

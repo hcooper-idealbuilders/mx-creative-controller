@@ -14,7 +14,7 @@ export type KeystrokeCommand =
   | 'focus'      // focuses target window, no keys
 
 export class KeystrokeSender {
-  send(command: KeystrokeCommand, claudePid: number | null): Promise<void> {
+  send(command: KeystrokeCommand, claudePid: number | null, projectHint?: string | null): Promise<void> {
     const args = [
       '-NoProfile',
       '-ExecutionPolicy', 'Bypass',
@@ -22,6 +22,7 @@ export class KeystrokeSender {
       '-Command', command,
     ]
     if (claudePid) args.push('-ClaudePid', String(claudePid))
+    if (projectHint) args.push('-ProjectHint', projectHint)
 
     return new Promise((resolve, reject) => {
       const proc = spawn('powershell', args, { windowsHide: true })
