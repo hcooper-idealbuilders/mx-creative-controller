@@ -7,7 +7,7 @@
 import { MxKeypad, type PressEvent } from './device.js'
 import { SidecarClient } from './sidecar-client.js'
 import { renderLayout, needsAnimation } from './renderer.js'
-import { applyOptimisticUpdate } from './optimistic.js'
+import { applyOptimisticUpdate, mergeWithOptimistic } from './optimistic.js'
 import type { Command, SessionStatus } from './state.js'
 
 const SIDECAR_URL = process.env.MX_SIDECAR_URL ?? 'ws://127.0.0.1:9876'
@@ -20,6 +20,13 @@ console.log('[keypad] device open')
 
 let currentSessions: SessionStatus[] = []
 let painting = false
+
+// Track when each session was last optimistically updated so an in-flight
+// stale sidecar broadcast doesn't wipe the press feedback. 1.5s is long
+// enough for the press to register visibly, short enough that real state
+// changes (Stop → done, new Notification → waiting_input) feel snappy.
+const optimisticAt = new Map<string, number>()
+const OPTIMISTIC_HOLD_MS = 1500
 
 async function repaint() {
   if (painting) return
@@ -43,8 +50,11 @@ await repaint()
 
 const sidecar = new SidecarClient(SIDECAR_URL)
 sidecar.on('sessions', (sessions: SessionStatus[]) => {
-  // Cap at 3 visible (FIFO).
-  currentSessions = sessions.slice(0, 3)
+  // Cap at 3 visible (FIFO), then merge with any in-flight optimistic state.
+  const incoming = sessions.slice(0, 3)
+  currentSessions = mergeWithOptimistic(
+    incoming, currentSessions, optimisticAt, Date.now(), OPTIMISTIC_HOLD_MS,
+  )
   void repaint()
 })
 sidecar.on('close', () => {
@@ -76,9 +86,10 @@ keypad.on('press', (evt: PressEvent) => {
   console.log(`[keypad] col ${col} (${session.session_id.slice(0, 8)}…) state=${session.state} → ${command}`)
   sidecar.sendCommand(session.session_id, command)
   // Optimistic local update — flip to thinking immediately so the LCD
-  // shows feedback instantly. Next real sessions broadcast will correct
-  // if Claude Code ends up in a different state.
+  // shows feedback instantly. Record the time so the next 1.5s of
+  // sidecar broadcasts don't wipe this state (see mergeWithOptimistic).
   currentSessions = applyOptimisticUpdate(currentSessions, session.session_id, command)
+  optimisticAt.set(session.session_id, Date.now())
   void repaint()
 })
 

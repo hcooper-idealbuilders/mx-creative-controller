@@ -29,3 +29,28 @@ export function applyOptimisticUpdate(
   // focus doesn't change state
   return sessions.slice()
 }
+
+/**
+ * Merge an incoming `sessions` broadcast with the keypad's current local state,
+ * honoring the optimistic-hold window so a fresh button-press isn't immediately
+ * wiped out by a status broadcast that's already in flight.
+ *
+ * If a session was optimistically updated less than `holdMs` ago, we keep the
+ * local copy of that session. Otherwise we accept the incoming version.
+ */
+export function mergeWithOptimistic(
+  incoming: ReadonlyArray<SessionStatus>,
+  local: ReadonlyArray<SessionStatus>,
+  optimisticAt: ReadonlyMap<string, number>,
+  now: number,
+  holdMs: number,
+): SessionStatus[] {
+  return incoming.map((s) => {
+    const lastOpt = optimisticAt.get(s.session_id) ?? 0
+    if (now - lastOpt < holdMs) {
+      const lcl = local.find((c) => c.session_id === s.session_id)
+      if (lcl) return lcl
+    }
+    return s
+  })
+}
