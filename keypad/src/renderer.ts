@@ -5,7 +5,7 @@
 //
 // All sessions render their own column. Empty columns render dark.
 import { Canvas, type SKRSContext2D, createCanvas } from '@napi-rs/canvas'
-import { type SessionStatus, type SessionState, STATE_COLOR } from './state.js'
+import { type SessionStatus, type SessionState, STATE_COLOR, STATE_BG } from './state.js'
 import { actionLabel, actionBg, isActionEnabled, type ActionRole } from './labels.js'
 
 const KEY = 118
@@ -63,8 +63,9 @@ export function renderStatusKey(
   session: SessionStatus | null,
   options?: { error?: boolean },
 ): Uint8Array {
-  const { canvas, ctx } = makeCanvas('#0a0a0a')
+  // No session in this column — render an empty/dark tile.
   if (!session) {
+    const { canvas, ctx } = makeCanvas('#0a0a0a')
     ctx.strokeStyle = '#222'
     ctx.lineWidth = 1
     ctx.strokeRect(8, 8, KEY - 16, KEY - 16)
@@ -73,30 +74,33 @@ export function renderStatusKey(
   }
 
   const state = session.state
-  const color = STATE_COLOR[state]
+  const bg    = STATE_BG[state]
+  const logo  = STATE_COLOR[state]
+  const { canvas, ctx } = makeCanvas(bg)
 
-  // Mark (or thinking dots) in the upper 2/3.
+  // Header text — session/project name + model — at the top of the tile.
+  // High-contrast white reads cleanly on the green/orange/red fills.
+  ctx.fillStyle = '#ffffff'
+  ctx.textAlign = 'center'
+  ctx.textBaseline = 'top'
+  ctx.font = `700 13px Inter, "Segoe UI", system-ui, sans-serif`
+  const project = session.project ?? '—'
+  ctx.fillText(truncate(ctx, project, KEY - 8), KEY / 2, 6)
+
+  ctx.fillStyle = '#ffffffcc'
+  ctx.font = `500 10px Inter, "Segoe UI", system-ui, sans-serif`
+  ctx.fillText(truncate(ctx, session.model ?? '', KEY - 8), KEY / 2, 24)
+
+  // Big mark (or thinking dots) centered in the remaining area.
   const cx = KEY / 2
-  const cy = 42
+  const cy = 78
   if (state === 'thinking') {
     drawThinkingDots(ctx, cx, cy)
   } else {
-    drawClaudeMark(ctx, cx, cy, 26, color)
+    drawClaudeMark(ctx, cx, cy, 30, logo)
   }
 
-  // Project name below the mark.
-  ctx.fillStyle = '#ffffff'
-  ctx.textAlign = 'center'
-  ctx.textBaseline = 'middle'
-  ctx.font = `600 14px Inter, "Segoe UI", system-ui, sans-serif`
-  const project = session.project ?? '—'
-  ctx.fillText(truncate(ctx, project, KEY - 12), cx, 84)
-
-  // Model in smaller muted text.
-  ctx.fillStyle = '#888888'
-  ctx.font = `500 10px Inter, "Segoe UI", system-ui, sans-serif`
-  ctx.fillText(truncate(ctx, session.model ?? '', KEY - 12), cx, 102)
-
+  if (options?.error) drawErrorBorder(ctx)
   return toRgba(canvas)
 }
 
