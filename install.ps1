@@ -125,11 +125,29 @@ Write-Host ''
 
 if ($StartNow) {
     Write-Host '==> -StartNow: stopping any dev (tsx) node processes, then starting tasks' -ForegroundColor Cyan
-    # Kill node processes whose path is inside this repo (so we don't nuke the user's other node apps).
-    Get-CimInstance Win32_Process -Filter "Name='node.exe'" | Where-Object {
-        $_.CommandLine -and ($_.CommandLine -like "*Hardware-interface*")
+    # Kill node processes spawned by our launchers. Start-Process strips the
+    # absolute path from the child's CommandLine, so we match by ancestor:
+    # a node whose parent (or grandparent) PowerShell is running one of our
+    # launcher scripts.
+    Get-CimInstance Win32_Process -Filter "Name='node.exe'" | ForEach-Object {
+        $node = $_
+        $walk = $node.ParentProcessId
+        for ($i = 0; $i -lt 4 -and $walk -gt 0; $i++) {
+            $p = Get-CimInstance Win32_Process -Filter "ProcessId=$walk" -ErrorAction SilentlyContinue
+            if (-not $p) { break }
+            if ($p.CommandLine -like "*$Root\launchers*" -or $p.CommandLine -like "*Hardware-interface*launchers*") {
+                Write-Host "    killing node pid $($node.ProcessId) (launched by our task)"
+                Stop-Process -Id $node.ProcessId -Force -ErrorAction SilentlyContinue
+                break
+            }
+            $walk = $p.ParentProcessId
+        }
+    }
+    # Also kill any leftover PowerShell launcher processes still holding log
+    # file handles, so the next start can write logs cleanly.
+    Get-CimInstance Win32_Process -Filter "Name='powershell.exe'" | Where-Object {
+        $_.CommandLine -like "*Hardware-interface*launchers*"
     } | ForEach-Object {
-        Write-Host "    killing pid $($_.ProcessId): $($_.CommandLine.Substring(0, [Math]::Min(80, $_.CommandLine.Length)))..."
         Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue
     }
     Start-Sleep -Seconds 1
