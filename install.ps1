@@ -81,7 +81,10 @@ Set shell = CreateObject("WScript.Shell")
 exitCode = shell.Run("powershell.exe -NoProfile -ExecutionPolicy Bypass -File ""$psPathLiteral""", 0, True)
 WScript.Quit exitCode
 "@
-    Set-Content -Path $vbsPath -Value $vbs -Encoding UTF8
+    # wscript.exe chokes on a BOM at the start of a .vbs file with
+    # "error: invalid character code 800A0408" — write without BOM.
+    $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
+    [System.IO.File]::WriteAllText($vbsPath, $vbs, $utf8NoBom)
 
     $action = New-ScheduledTaskAction -Execute 'wscript.exe' -Argument "`"$vbsPath`""
 

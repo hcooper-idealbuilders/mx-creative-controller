@@ -58,16 +58,19 @@ describe('actionBg', () => {
 })
 
 describe('isActionEnabled', () => {
-  it('primary disabled while thinking (avoids accidental stray prompts)', () => {
+  it('primary disabled while thinking (avoids stray prompts mid-response)', () => {
     expect(isActionEnabled('thinking', 'primary')).toBe(false)
   })
 
-  it('primary disabled while idle', () => {
+  it('primary disabled while idle (no pending input request)', () => {
     expect(isActionEnabled('idle', 'primary')).toBe(false)
   })
 
-  it('primary enabled on done, waiting_input, ended', () => {
-    expect(isActionEnabled('done', 'primary')).toBe(true)
+  it('primary disabled when done — Claude is not waiting on you', () => {
+    expect(isActionEnabled('done', 'primary')).toBe(false)
+  })
+
+  it('primary enabled on waiting_input (Approve) and ended (Resume)', () => {
     expect(isActionEnabled('waiting_input', 'primary')).toBe(true)
     expect(isActionEnabled('ended', 'primary')).toBe(true)
   })

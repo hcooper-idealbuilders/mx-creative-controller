@@ -25,11 +25,18 @@ export function actionBg(state: SessionState | null, role: ActionRole): string {
  * Whether the action button does something meaningful in the given state.
  * When false, the keypad dims the button and ignores presses.
  *
- *   primary (Continue/Approve/Resume) is meaningful in done, waiting_input, ended
- *   secondary (Focus/Dismiss) is always meaningful when a session exists
+ * The keypad's job is to handle moments when Claude actually needs you —
+ * not to type arbitrary prompts. So primary is enabled only when:
+ *   - waiting_input → Approve  (Claude is blocked on user input)
+ *   - ended         → Resume   (session ended, can be brought back)
+ *
+ * In done state, Claude has just finished and there's nothing pending;
+ * typing a fresh prompt is a terminal action, not a keypad one.
+ *
+ *   secondary (Focus/Dismiss) is always meaningful when a session exists.
  */
 export function isActionEnabled(state: SessionState | null, role: ActionRole): boolean {
   if (state === null) return false
   if (role === 'secondary') return true
-  return state === 'done' || state === 'waiting_input' || state === 'ended'
+  return state === 'waiting_input' || state === 'ended'
 }
