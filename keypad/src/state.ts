@@ -17,8 +17,17 @@ export interface SessionStatus {
 }
 
 // Commands sent from the keypad to the sidecar. The sidecar maps these to
-// actual keystrokes (continue → approve when state === waiting_input).
-export type Command = 'continue' | 'focus'
+// actual keystrokes:
+//   continue + state=waiting_input → 'y⏎'
+//   focus                          → focus window only
+//   effort-<level>                 → /effort <level>⏎
+export type Command =
+  | 'continue'
+  | 'focus'
+  | 'effort-low'
+  | 'effort-medium'
+  | 'effort-high'
+  | 'effort-xhigh'
 
 // Status-key background per state — solid color filling the whole key.
 //   green  = Claude is not waiting on you (idle, done)

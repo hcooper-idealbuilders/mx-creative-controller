@@ -6,26 +6,38 @@
 import type { KeystrokeCommand } from './keystroke-sender.js'
 import type { SessionState } from './sessions-watcher.js'
 
-export type IncomingCommand = 'continue' | 'focus'
+export type IncomingCommand =
+  | 'continue'
+  | 'focus'
+  | 'effort-low'
+  | 'effort-medium'
+  | 'effort-high'
+  | 'effort-xhigh'
 
 export type RoutingResult =
   | { kind: 'keystroke'; keystroke: KeystrokeCommand }
   | { kind: 'unknown' }
 
+const EFFORT_COMMANDS = new Set<string>([
+  'effort-low', 'effort-medium', 'effort-high', 'effort-xhigh',
+])
+
 /**
  * Map a keypad command + session state to the actual side effect.
  *   continue + waiting_input → approve  (sends `y⏎`)
  *   focus                    → focus    (focus window, no keys)
+ *   effort-<level>           → effort-<level>  (sends `/effort <level>⏎`)
  *
  * The keypad's primary button is gated by isActionEnabled and only
- * dispatches "continue" when state === waiting_input, so the routing
- * doesn't need a fallback continue keystroke any more — anything else
- * arriving here is unexpected.
+ * dispatches "continue" when state === waiting_input.
  */
 export function routeCommand(command: string, state: SessionState): RoutingResult {
   if (command === 'continue' && state === 'waiting_input') {
     return { kind: 'keystroke', keystroke: 'approve' }
   }
   if (command === 'focus') return { kind: 'keystroke', keystroke: 'focus' }
+  if (EFFORT_COMMANDS.has(command)) {
+    return { kind: 'keystroke', keystroke: command as KeystrokeCommand }
+  }
   return { kind: 'unknown' }
 }

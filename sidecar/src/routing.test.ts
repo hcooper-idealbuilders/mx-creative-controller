@@ -20,6 +20,14 @@ describe('routeCommand', () => {
     }
   })
 
+  it('effort-* → matching keystroke regardless of state', () => {
+    for (const level of ['low', 'medium', 'high', 'xhigh'] as const) {
+      const cmd = `effort-${level}`
+      expect(routeCommand(cmd, 'done'))
+        .toEqual({ kind: 'keystroke', keystroke: cmd })
+    }
+  })
+
   it('unknown command → unknown', () => {
     expect(routeCommand('garbage', 'done')).toEqual({ kind: 'unknown' })
     expect(routeCommand('', 'done')).toEqual({ kind: 'unknown' })

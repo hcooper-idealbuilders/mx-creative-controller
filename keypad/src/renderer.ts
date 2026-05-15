@@ -7,6 +7,7 @@
 import { Canvas, type SKRSContext2D, createCanvas } from '@napi-rs/canvas'
 import { type SessionStatus, type SessionState, STATE_COLOR, STATE_BG } from './state.js'
 import { actionLabel, actionBg, isActionEnabled, type ActionRole } from './labels.js'
+import { type EffortLevel, effortShort } from './effort.js'
 
 const KEY = 118
 
@@ -61,7 +62,7 @@ function drawThinkingDots(ctx: SKRSContext2D, cx: number, cy: number) {
 
 export function renderStatusKey(
   session: SessionStatus | null,
-  options?: { error?: boolean },
+  options?: { error?: boolean; effort?: EffortLevel | null },
 ): Uint8Array {
   // No session in this column — render an empty/dark tile.
   if (!session) {
@@ -98,6 +99,15 @@ export function renderStatusKey(
     drawThinkingDots(ctx, cx, cy)
   } else {
     drawClaudeMark(ctx, cx, cy, 30, logo)
+  }
+
+  // Effort indicator in the upper-right corner if the user has set one.
+  if (options?.effort) {
+    ctx.fillStyle = '#ffffffdd'
+    ctx.textAlign = 'right'
+    ctx.textBaseline = 'top'
+    ctx.font = `700 12px Inter, "Segoe UI", system-ui, sans-serif`
+    ctx.fillText(effortShort(options.effort), KEY - 6, 6)
   }
 
   if (options?.error) drawErrorBorder(ctx)
@@ -152,14 +162,19 @@ function drawErrorBorder(ctx: SKRSContext2D) {
  */
 export function renderLayout(
   sessions: ReadonlyArray<SessionStatus>,
-  options?: { errorSessionIds?: ReadonlySet<string> },
+  options?: {
+    errorSessionIds?: ReadonlySet<string>
+    effortBySession?: ReadonlyMap<string, EffortLevel>
+  },
 ): Uint8Array[] {
   const errSet = options?.errorSessionIds ?? new Set<string>()
+  const effortMap = options?.effortBySession
   const out: Uint8Array[] = new Array(9)
   for (let col = 0; col < 3; col++) {
     const s = sessions[col] ?? null
     const err = s ? errSet.has(s.session_id) : false
-    out[0 + col] = renderStatusKey(s, { error: err })
+    const effort = s ? (effortMap?.get(s.session_id) ?? null) : null
+    out[0 + col] = renderStatusKey(s, { error: err, effort })
     out[3 + col] = renderActionKey(s, 'primary')
     out[6 + col] = renderActionKey(s, 'secondary')
   }

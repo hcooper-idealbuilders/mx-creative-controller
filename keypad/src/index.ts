@@ -13,6 +13,7 @@ import {
   hasRecentError, recordError, pruneErrors,
   type CommandError,
 } from './errors.js'
+import { nextEffort, type EffortLevel } from './effort.js'
 import type { Command, SessionStatus } from './state.js'
 
 const SIDECAR_URL = process.env.MX_SIDECAR_URL ?? 'ws://127.0.0.1:9876'
@@ -38,6 +39,11 @@ const OPTIMISTIC_HOLD_MS = 1500
 let errors = new Map<string, CommandError>()
 const ERROR_DISPLAY_MS = 2500
 
+// Track the effort level the keypad most recently set, per session.
+// Hooks don't surface Claude Code's actual effort level, so this only
+// reflects what we sent — null means "never pressed in this session".
+const effortBySession = new Map<string, EffortLevel>()
+
 async function repaint() {
   if (painting) return
   painting = true
@@ -48,7 +54,7 @@ async function repaint() {
     for (const [id] of errors) {
       if (hasRecentError(id, errors, now, ERROR_DISPLAY_MS)) errorSessionIds.add(id)
     }
-    const rgbas = renderLayout(currentSessions, { errorSessionIds })
+    const rgbas = renderLayout(currentSessions, { errorSessionIds, effortBySession })
     for (let i = 0; i < rgbas.length; i++) {
       try {
         await keypad.paintKey(i, rgbas[i])
@@ -101,7 +107,16 @@ keypad.on('press', (evt: PressEvent) => {
   if (!session) return
 
   let command: Command | null = null
-  if (row === 0) return // status key — render-only
+  if (row === 0) {
+    // Status key cycles per-session effort level.
+    const next = nextEffort(effortBySession.get(session.session_id) ?? null)
+    effortBySession.set(session.session_id, next)
+    const effortCmd = `effort-${next}` as Command
+    console.log(`[keypad] col ${col} (${session.session_id.slice(0, 8)}…) effort → ${next}`)
+    sidecar.sendCommand(session.session_id, effortCmd)
+    void repaint()
+    return
+  }
   if (row === 1) {
     // Primary only fires on waiting_input (sends 'continue', which the
     // sidecar maps to an 'y⏎' approve keystroke).
