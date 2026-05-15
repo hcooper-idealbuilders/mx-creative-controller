@@ -7,7 +7,8 @@
 import { Canvas, type SKRSContext2D, createCanvas } from '@napi-rs/canvas'
 import { type SessionStatus, type SessionState, STATE_COLOR, STATE_BG } from './state.js'
 import { actionLabel, actionBg, isActionEnabled, type ActionRole } from './labels.js'
-import { type EffortLevel, effortShort } from './effort.js'
+import { type EffortLevel, effortLabel } from './effort.js'
+import { formatTitle, formatModel } from './format.js'
 
 const KEY = 118
 
@@ -76,38 +77,30 @@ export function renderStatusKey(
 
   const state = session.state
   const bg    = STATE_BG[state]
-  const logo  = STATE_COLOR[state]
   const { canvas, ctx } = makeCanvas(bg)
+  const cx = KEY / 2
 
-  // Header text — session/project name + model — at the top of the tile.
-  // High-contrast white reads cleanly on the green/orange/red fills.
+  // Row 1 — title (one word, max 12 chars). Always visible, including in
+  // thinking state, so the user can still tell which session is which.
   ctx.fillStyle = '#ffffff'
   ctx.textAlign = 'center'
   ctx.textBaseline = 'top'
-  ctx.font = `700 13px Inter, "Segoe UI", system-ui, sans-serif`
-  const project = session.project ?? '—'
-  ctx.fillText(truncate(ctx, project, KEY - 8), KEY / 2, 6)
+  ctx.font = `700 14px Inter, "Segoe UI", system-ui, sans-serif`
+  ctx.fillText(formatTitle(session.project), cx, 8)
 
-  ctx.fillStyle = '#ffffffcc'
-  ctx.font = `500 10px Inter, "Segoe UI", system-ui, sans-serif`
-  ctx.fillText(truncate(ctx, session.model ?? '', KEY - 8), KEY / 2, 24)
-
-  // Big mark (or thinking dots) centered in the remaining area.
-  const cx = KEY / 2
-  const cy = 78
   if (state === 'thinking') {
-    drawThinkingDots(ctx, cx, cy)
+    // Title only; dots center of the tile.
+    drawThinkingDots(ctx, cx, 70)
   } else {
-    drawClaudeMark(ctx, cx, cy, 30, logo)
-  }
-
-  // Effort indicator in the upper-right corner if the user has set one.
-  if (options?.effort) {
+    // Row 2 — model, simplified
     ctx.fillStyle = '#ffffffdd'
-    ctx.textAlign = 'right'
-    ctx.textBaseline = 'top'
+    ctx.font = `600 13px Inter, "Segoe UI", system-ui, sans-serif`
+    ctx.fillText(formatModel(session.model), cx, 50)
+
+    // Row 3 — effort level word, shown only after the user has cycled
+    ctx.fillStyle = '#ffffffaa'
     ctx.font = `700 12px Inter, "Segoe UI", system-ui, sans-serif`
-    ctx.fillText(effortShort(options.effort), KEY - 6, 6)
+    ctx.fillText(options?.effort ? effortLabel(options.effort) : '', cx, 88)
   }
 
   if (options?.error) drawErrorBorder(ctx)

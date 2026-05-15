@@ -24,3 +24,13 @@ export function effortShort(level: EffortLevel): string {
     case 'xhigh':  return 'X'
   }
 }
+
+/** Display word for the bottom row of the status tile. */
+export function effortLabel(level: EffortLevel): string {
+  switch (level) {
+    case 'low':    return 'LOW'
+    case 'medium': return 'MED'
+    case 'high':   return 'HIGH'
+    case 'xhigh':  return 'XHIGH'
+  }
+}
