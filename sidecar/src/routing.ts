@@ -6,27 +6,26 @@
 import type { KeystrokeCommand } from './keystroke-sender.js'
 import type { SessionState } from './sessions-watcher.js'
 
-export type IncomingCommand = 'continue' | 'resume' | 'focus' | 'dismiss'
+export type IncomingCommand = 'continue' | 'focus'
 
 export type RoutingResult =
   | { kind: 'keystroke'; keystroke: KeystrokeCommand }
-  | { kind: 'dismiss' }
   | { kind: 'unknown' }
 
 /**
  * Map a keypad command + session state to the actual side effect.
  *   continue + waiting_input → approve  (sends `y⏎`)
- *   continue + anything else → continue (sends `continue⏎`)
- *   resume                  → resume   (sends `/resume⏎`)
- *   focus                   → focus    (focus window, no keys)
- *   dismiss                 → dismiss  (delete session file, no keys)
+ *   focus                    → focus    (focus window, no keys)
+ *
+ * The keypad's primary button is gated by isActionEnabled and only
+ * dispatches "continue" when state === waiting_input, so the routing
+ * doesn't need a fallback continue keystroke any more — anything else
+ * arriving here is unexpected.
  */
 export function routeCommand(command: string, state: SessionState): RoutingResult {
-  if (command === 'dismiss') return { kind: 'dismiss' }
-  if (command === 'continue') {
-    return { kind: 'keystroke', keystroke: state === 'waiting_input' ? 'approve' : 'continue' }
+  if (command === 'continue' && state === 'waiting_input') {
+    return { kind: 'keystroke', keystroke: 'approve' }
   }
-  if (command === 'resume') return { kind: 'keystroke', keystroke: 'resume' }
-  if (command === 'focus')  return { kind: 'keystroke', keystroke: 'focus' }
+  if (command === 'focus') return { kind: 'keystroke', keystroke: 'focus' }
   return { kind: 'unknown' }
 }

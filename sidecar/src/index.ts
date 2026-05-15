@@ -30,12 +30,7 @@ server.on('command', async (cmd: CommandMessage) => {
   }
   const result = routeCommand(cmd.command, session.state)
   if (result.kind === 'unknown') {
-    console.error(`[mx-sidecar] unknown command: ${cmd.command}`)
-    return
-  }
-  if (result.kind === 'dismiss') {
-    console.log(`[mx-sidecar] dismiss session ${cmd.sessionId}`)
-    await watcher.dismiss(cmd.sessionId)
+    console.error(`[mx-sidecar] unknown command: ${cmd.command} in state ${session.state}`)
     return
   }
   console.log(`[mx-sidecar] ${cmd.sessionId.slice(0, 8)}… state=${session.state} → ${result.keystroke}`)

@@ -20,19 +20,6 @@ describe('applyOptimisticUpdate', () => {
     expect(after[0].state).toBe('thinking')
   })
 
-  it('resume → target session flips to thinking', () => {
-    const after = applyOptimisticUpdate([make('a', 'ended')], 'a', 'resume')
-    expect(after[0].state).toBe('thinking')
-    expect(after[0].last_event).toBe('optimistic:resume')
-  })
-
-  it('dismiss → session removed from array', () => {
-    const before = [make('a', 'ended'), make('b', 'done')]
-    const after  = applyOptimisticUpdate(before, 'a', 'dismiss')
-    expect(after.length).toBe(1)
-    expect(after[0].session_id).toBe('b')
-  })
-
   it('focus → no state change', () => {
     const before = [make('a', 'done')]
     const after  = applyOptimisticUpdate(before, 'a', 'focus')

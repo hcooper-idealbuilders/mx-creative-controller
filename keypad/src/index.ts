@@ -103,15 +103,15 @@ keypad.on('press', (evt: PressEvent) => {
   let command: Command | null = null
   if (row === 0) return // status key — render-only
   if (row === 1) {
-    // Primary action gated by isActionEnabled — no stray 'continue\n' when
-    // Claude is mid-thought or idle.
+    // Primary only fires on waiting_input (sends 'continue', which the
+    // sidecar maps to an 'y⏎' approve keystroke).
     if (!isActionEnabled(session.state, 'primary')) {
       console.log(`[keypad] col ${col} state=${session.state}: primary disabled`)
       return
     }
-    command = session.state === 'ended' ? 'resume' : 'continue'
+    command = 'continue'
   } else if (row === 2) {
-    command = session.state === 'ended' ? 'dismiss' : 'focus'
+    command = 'focus'
   }
   if (!command) return
   console.log(`[keypad] col ${col} (${session.session_id.slice(0, 8)}…) state=${session.state} → ${command}`)

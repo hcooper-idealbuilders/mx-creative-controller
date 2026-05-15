@@ -3,7 +3,7 @@ import { readdir, readFile, unlink, mkdir } from 'node:fs/promises'
 import { watch as fsWatch, existsSync } from 'node:fs'
 import { join } from 'node:path'
 
-export type SessionState = 'idle' | 'thinking' | 'done' | 'waiting_input' | 'ended'
+export type SessionState = 'idle' | 'thinking' | 'done' | 'waiting_input'
 
 /**
  * Sessions whose last_updated is older than this are considered abandoned

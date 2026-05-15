@@ -18,18 +18,10 @@ describe('actionLabel', () => {
     expect(actionLabel('thinking', 'primary')).toBe('Continue')
   })
 
-  it('primary on ended → Resume', () => {
-    expect(actionLabel('ended', 'primary')).toBe('Resume')
-  })
-
-  it('secondary normally → Focus', () => {
-    expect(actionLabel('done', 'secondary')).toBe('Focus')
-    expect(actionLabel('thinking', 'secondary')).toBe('Focus')
-    expect(actionLabel('waiting_input', 'secondary')).toBe('Focus')
-  })
-
-  it('secondary on ended → Dismiss', () => {
-    expect(actionLabel('ended', 'secondary')).toBe('Dismiss')
+  it('secondary always → Focus', () => {
+    for (const s of ['done', 'thinking', 'waiting_input', 'idle'] as const) {
+      expect(actionLabel(s, 'secondary')).toBe('Focus')
+    }
   })
 
   it('null session → empty label', () => {
@@ -45,11 +37,6 @@ describe('actionBg', () => {
     const idle    = actionBg('idle', 'primary')
     expect(waiting).not.toBe(done)
     expect(idle).toBe(done)
-  })
-
-  it('ended-state buttons have a distinct color from alive equivalents', () => {
-    expect(actionBg('ended', 'primary')).not.toBe(actionBg('done', 'primary'))
-    expect(actionBg('ended', 'secondary')).not.toBe(actionBg('done', 'secondary'))
   })
 
   it('null session → dark (matches the blank status key)', () => {
@@ -70,13 +57,12 @@ describe('isActionEnabled', () => {
     expect(isActionEnabled('done', 'primary')).toBe(false)
   })
 
-  it('primary enabled on waiting_input (Approve) and ended (Resume)', () => {
+  it('primary enabled only on waiting_input (Approve)', () => {
     expect(isActionEnabled('waiting_input', 'primary')).toBe(true)
-    expect(isActionEnabled('ended', 'primary')).toBe(true)
   })
 
-  it('secondary (Focus / Dismiss) always enabled when a session exists', () => {
-    for (const s of ['idle', 'thinking', 'done', 'waiting_input', 'ended'] as const) {
+  it('secondary (Focus) always enabled when a session exists', () => {
+    for (const s of ['idle', 'thinking', 'done', 'waiting_input'] as const) {
       expect(isActionEnabled(s, 'secondary')).toBe(true)
     }
   })

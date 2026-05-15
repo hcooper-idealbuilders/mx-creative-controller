@@ -6,11 +6,7 @@ const here = dirname(fileURLToPath(import.meta.url))
 const SCRIPT = join(here, '..', 'scripts', 'send-keys.ps1')
 
 export type KeystrokeCommand =
-  | 'continue'   // sends 'continue⏎'
   | 'approve'    // sends 'y⏎'
-  | 'reject'     // sends 'n⏎'
-  | 'interrupt'  // sends Esc
-  | 'resume'     // sends '/resume⏎'
   | 'focus'      // focuses target window, no keys
 
 export class KeystrokeSender {

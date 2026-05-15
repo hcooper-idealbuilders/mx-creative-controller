@@ -14,17 +14,13 @@ export function applyOptimisticUpdate(
   sessionId: string,
   command: Command,
 ): SessionStatus[] {
-  // continue / resume both put Claude back to work — flip to thinking
-  if (command === 'continue' || command === 'resume') {
+  // continue (Approve) puts Claude back to work — flip to thinking
+  if (command === 'continue') {
     return sessions.map((s) =>
       s.session_id === sessionId
-        ? { ...s, state: 'thinking', last_event: `optimistic:${command}` }
+        ? { ...s, state: 'thinking', last_event: 'optimistic:continue' }
         : s,
     )
-  }
-  // dismiss removes the session locally; sidecar will confirm via file deletion
-  if (command === 'dismiss') {
-    return sessions.filter((s) => s.session_id !== sessionId)
   }
   // focus doesn't change state
   return sessions.slice()

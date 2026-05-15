@@ -1,6 +1,6 @@
 param(
     [Parameter(Mandatory=$true)]
-    [ValidateSet('continue','approve','reject','interrupt','resume','focus')]
+    [ValidateSet('approve','focus')]
     [string]$Command,
 
     [int]$ClaudePid,
@@ -17,12 +17,8 @@ param(
 $ErrorActionPreference = 'Stop'
 
 $keys = switch ($Command) {
-    'continue'  { 'continue{ENTER}' }
-    'approve'   { 'y{ENTER}' }
-    'reject'    { 'n{ENTER}' }
-    'interrupt' { '{ESC}' }
-    'resume'    { '/resume{ENTER}' }
-    'focus'     { $null }
+    'approve' { 'y{ENTER}' }
+    'focus'   { $null }
 }
 
 Add-Type -AssemblyName System.Windows.Forms

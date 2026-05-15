@@ -1,6 +1,6 @@
 // Multi-session types + per-state colors for the keypad layout.
 
-export type SessionState = 'idle' | 'thinking' | 'done' | 'waiting_input' | 'ended'
+export type SessionState = 'idle' | 'thinking' | 'done' | 'waiting_input'
 
 export interface SessionStatus {
   state: SessionState
@@ -16,21 +16,19 @@ export interface SessionStatus {
   last_updated: string | null
 }
 
-// Commands sent from the keypad to the sidecar. The sidecar decides the
-// actual keystroke (smart `continue` switches to `y⏎` when waiting_input).
-export type Command = 'continue' | 'focus' | 'resume' | 'dismiss'
+// Commands sent from the keypad to the sidecar. The sidecar maps these to
+// actual keystrokes (continue → approve when state === waiting_input).
+export type Command = 'continue' | 'focus'
 
 // Status-key background per state — solid color filling the whole key.
 //   green  = Claude is not waiting on you (idle, done)
 //   orange = Claude needs input          (waiting_input)
 //   dark   = Claude is thinking          (just the pulsing dots)
-//   red    = session ended               (ended)
 export const STATE_BG: Record<SessionState, string> = {
   idle:          '#1f7a3a',
   thinking:      '#0a0a0a',
   waiting_input: '#cc7000',
   done:          '#1f7a3a',
-  ended:         '#a02828',
 }
 
 // Claude-mark color per state — a darker shade of the background so the
@@ -40,7 +38,6 @@ export const STATE_COLOR: Record<SessionState, string> = {
   thinking:      '#cccccc', // unused — dots are drawn instead of a mark
   waiting_input: '#7a3c00',
   done:          '#0e4f24',
-  ended:         '#5e1414',
 }
 
 export const KEYPAD_COLS = 3

@@ -4,6 +4,26 @@ param(
     [string]$Event
 )
 
+# SessionEnd is special: we just remove the file. "Ended" isn't a state we
+# display — the keypad shows current sessions only. /resume gives us a fresh
+# session_id anyway, so persisting the predecessor only causes UI confusion.
+if ($Event -eq 'SessionEnd') {
+    $hookJson = [Console]::In.ReadToEnd()
+    $payload = if ($hookJson) { try { $hookJson | ConvertFrom-Json } catch { $null } } else { $null }
+    if ($payload -and $payload.session_id) {
+        $sessionsDir = Join-Path $env:USERPROFILE '.claude\mx-sessions'
+        $path = Join-Path $sessionsDir "$([string]$payload.session_id).json"
+        if (Test-Path $path) {
+            Remove-Item -LiteralPath $path -Force -ErrorAction SilentlyContinue
+        }
+    }
+    try {
+        Add-Content -Path 'C:\Users\hdcooper\Hardware-interface\logs\hooks-debug.log' `
+                    -Value "$(Get-Date -Format 'o')`tSessionEnd-DELETED`t$($payload.session_id)" -Encoding UTF8
+    } catch { }
+    return
+}
+
 $ErrorActionPreference = 'Stop'
 
 # Debug log so we can verify every hook invocation, not just the "last_event"
@@ -64,7 +84,6 @@ $status.state = switch ($Event) {
     'UserPromptSubmit' { 'thinking' }
     'Stop'             { 'done' }
     'Notification'     { 'waiting_input' }
-    'SessionEnd'       { 'ended' }
     # Tool use means Claude is actively working, even if a Notification
     # set us to waiting_input moments ago (e.g. an auto-approved permission
     # prompt left no follow-up signal). Flip back to thinking.
