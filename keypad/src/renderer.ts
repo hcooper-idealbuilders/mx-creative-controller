@@ -107,6 +107,24 @@ export function renderStatusKey(
   return toRgba(canvas)
 }
 
+/**
+ * 9-colour rainbow palette for the "no sessions yet" screensaver. One
+ * Claude mark per key, distinct hues so it's obvious at a glance that
+ * the controller is running even when there's no Claude Code session
+ * to interact with.
+ */
+const SCREENSAVER_PALETTE: ReadonlyArray<string> = [
+  '#ff4d4d', '#ff8c1a', '#ffd633',
+  '#4dd66b', '#33cccc', '#4d8cff',
+  '#8c4dff', '#ff4dcc', '#ffffff',
+]
+
+function renderScreensaverTile(idx: number): Uint8Array {
+  const { canvas, ctx } = makeCanvas('#0a0a0a')
+  drawClaudeMark(ctx, KEY / 2, KEY / 2, 34, SCREENSAVER_PALETTE[idx % SCREENSAVER_PALETTE.length])
+  return toRgba(canvas)
+}
+
 function darken(hex: string, factor: number): string {
   const m = /^#([0-9a-f]{6})$/i.exec(hex)
   if (!m) return hex
@@ -160,6 +178,15 @@ export function renderLayout(
     effortBySession?: ReadonlyMap<string, EffortLevel>
   },
 ): Uint8Array[] {
+  // No sessions at all — show the screensaver so the keypad still proves
+  // it's running. As soon as the first SessionStart hook fires we drop
+  // back to the normal 3-column layout.
+  if (sessions.length === 0) {
+    const out: Uint8Array[] = new Array(9)
+    for (let i = 0; i < 9; i++) out[i] = renderScreensaverTile(i)
+    return out
+  }
+
   const errSet = options?.errorSessionIds ?? new Set<string>()
   const effortMap = options?.effortBySession
   const out: Uint8Array[] = new Array(9)
