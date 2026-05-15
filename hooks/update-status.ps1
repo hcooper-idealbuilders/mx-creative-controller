@@ -90,6 +90,21 @@ $status.state = switch ($Event) {
     'PreToolUse'       { 'thinking' }
     'PostToolUse'      { 'thinking' }
 }
+
+# Capture Notification message so the keypad can distinguish permission
+# prompts (where Approve = '1⏎' is the right answer) from free-text input
+# requests (where the user has to type a reply). Cleared on any non-
+# Notification event so a stale message doesn't outlast its prompt.
+if ($Event -eq 'Notification') {
+    $msg = if ($payload -and $payload.message) { [string]$payload.message } else { '' }
+    $status | Add-Member -NotePropertyName 'notification_message' -NotePropertyValue $msg -Force
+    try {
+        Add-Content -Path 'C:\Users\hdcooper\Hardware-interface\logs\hooks-debug.log' `
+                    -Value "$(Get-Date -Format 'o')`tNOTIFICATION-MSG`t$msg" -Encoding UTF8
+    } catch { }
+} else {
+    $status | Add-Member -NotePropertyName 'notification_message' -NotePropertyValue $null -Force
+}
 $status.last_event   = $Event
 $status.last_updated = (Get-Date).ToUniversalTime().ToString('o')
 
