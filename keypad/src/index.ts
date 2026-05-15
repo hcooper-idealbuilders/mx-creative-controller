@@ -15,6 +15,7 @@ import {
 } from './errors.js'
 import { nextEffort, type EffortLevel } from './effort.js'
 import type { Command, SessionStatus } from './state.js'
+import { readFileSync } from 'node:fs'
 
 const SIDECAR_URL = process.env.MX_SIDECAR_URL ?? 'ws://127.0.0.1:9876'
 const IDLE_REFRESH_MS = Number(process.env.MX_REFRESH_MS ?? 1000)
@@ -41,9 +42,30 @@ let errors = new Map<string, CommandError>()
 const ERROR_DISPLAY_MS = 2500
 
 // Track the effort level the keypad most recently set, per session.
-// Hooks don't surface Claude Code's actual effort level, so this only
-// reflects what we sent — null means "never pressed in this session".
+// Hooks don't surface Claude Code's actual effort level — for sessions
+// the user hasn't cycled yet, fall back to the global default read once
+// at startup from ~/.claude/settings.json.
 const effortBySession = new Map<string, EffortLevel>()
+
+function readGlobalDefaultEffort(): EffortLevel | null {
+  const path = `${process.env.USERPROFILE}\\.claude\\settings.json`
+  try {
+    let raw = readFileSync(path, 'utf8')
+    if (raw.charCodeAt(0) === 0xfeff) raw = raw.slice(1)
+    const parsed = JSON.parse(raw) as { effortLevel?: string }
+    const e = parsed.effortLevel
+    if (e === 'low' || e === 'medium' || e === 'high' || e === 'xhigh') return e
+  } catch (err) {
+    console.error('[keypad] couldnt read effort default from settings.json:', (err as Error).message)
+  }
+  return null
+}
+const defaultEffort: EffortLevel | null = readGlobalDefaultEffort()
+console.log(`[keypad] default effort: ${defaultEffort ?? '(unknown)'}`)
+
+function effectiveEffort(sessionId: string): EffortLevel | null {
+  return effortBySession.get(sessionId) ?? defaultEffort
+}
 
 async function repaint() {
   if (painting) return
@@ -59,7 +81,14 @@ async function repaint() {
     // Apply optimistic overlays over the real broadcast state. Fresh entries
     // win; expired ones fall through to whatever the sidecar last sent.
     const effective = getEffectiveSessions(currentSessions, optimisticStates, now, OPTIMISTIC_HOLD_MS)
-    const rgbas = renderLayout(effective, { errorSessionIds, effortBySession })
+    // Effective effort = per-session override if set, else the global default
+    // read from settings.json at startup.
+    const effortView = new Map<string, EffortLevel>()
+    for (const s of effective) {
+      const e = effectiveEffort(s.session_id)
+      if (e) effortView.set(s.session_id, e)
+    }
+    const rgbas = renderLayout(effective, { errorSessionIds, effortBySession: effortView })
     for (let i = 0; i < rgbas.length; i++) {
       try {
         await keypad.paintKey(i, rgbas[i])

@@ -90,17 +90,17 @@ export function renderStatusKey(
 
   if (state === 'thinking') {
     // Title only; dots center of the tile.
-    drawThinkingDots(ctx, cx, 70)
+    drawThinkingDots(ctx, cx, 74)
   } else {
-    // Row 2 — model, simplified
+    // Row 2 — model, simplified, tight under the title
     ctx.fillStyle = '#ffffffdd'
     ctx.font = `600 13px Inter, "Segoe UI", system-ui, sans-serif`
-    ctx.fillText(formatModel(session.model), cx, 50)
+    ctx.fillText(formatModel(session.model), cx, 32)
 
-    // Row 3 — effort level word, shown only after the user has cycled
+    // Row 3 — effort level word, just below the model
     ctx.fillStyle = '#ffffffaa'
     ctx.font = `700 12px Inter, "Segoe UI", system-ui, sans-serif`
-    ctx.fillText(options?.effort ? effortLabel(options.effort) : '', cx, 88)
+    ctx.fillText(options?.effort ? effortLabel(options.effort) : '', cx, 56)
   }
 
   if (options?.error) drawErrorBorder(ctx)
