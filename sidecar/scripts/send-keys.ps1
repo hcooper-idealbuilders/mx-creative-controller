@@ -17,7 +17,11 @@ param(
 $ErrorActionPreference = 'Stop'
 
 $keys = switch ($Command) {
-    'approve'       { 'y{ENTER}' }
+    # Claude Code permission prompts show a numbered menu (1. Yes / 2. ... / 3. No).
+    # Typing the literal "1" + Enter selects option 1 reliably, regardless of
+    # which row is highlighted. "y" is not a documented binding and was being
+    # silently dropped.
+    'approve'       { '1{ENTER}' }
     'focus'         { $null }
     'effort-low'    { '/effort low{ENTER}' }
     'effort-medium' { '/effort medium{ENTER}' }
