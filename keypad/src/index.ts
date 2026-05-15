@@ -7,7 +7,7 @@
 import { MxKeypad, type PressEvent } from './device.js'
 import { SidecarClient, type CommandResult } from './sidecar-client.js'
 import { renderLayout, needsAnimation } from './renderer.js'
-import { applyOptimisticUpdate, mergeWithOptimistic } from './optimistic.js'
+import { getEffectiveSessions, pruneOptimistic, type OptimisticEntry } from './optimistic.js'
 import { isActionEnabled } from './labels.js'
 import {
   hasRecentError, recordError, pruneErrors,
@@ -27,11 +27,12 @@ console.log('[keypad] device open')
 let currentSessions: SessionStatus[] = []
 let painting = false
 
-// Track when each session was last optimistically updated so an in-flight
-// stale sidecar broadcast doesn't wipe the press feedback. 1.5s is long
-// enough for the press to register visibly, short enough that real state
-// changes (Stop → done, new Notification → waiting_input) feel snappy.
-const optimisticAt = new Map<string, number>()
+// Per-session optimistic state overlays. Each press that should produce
+// visible state feedback (e.g. Approve → thinking) drops an entry here
+// with a timestamp. Renderer overlays these atop the real state from the
+// last sidecar broadcast; entries expire after OPTIMISTIC_HOLD_MS so a
+// failed keystroke (no follow-up hook ever fires) doesn't strand the LCD.
+let optimisticStates = new Map<string, OptimisticEntry>()
 const OPTIMISTIC_HOLD_MS = 1500
 
 // Track recent command failures so the keypad can flash an error border
@@ -50,11 +51,15 @@ async function repaint() {
   try {
     const now = Date.now()
     errors = pruneErrors(errors, now, ERROR_DISPLAY_MS)
+    optimisticStates = pruneOptimistic(optimisticStates, now, OPTIMISTIC_HOLD_MS)
     const errorSessionIds = new Set<string>()
     for (const [id] of errors) {
       if (hasRecentError(id, errors, now, ERROR_DISPLAY_MS)) errorSessionIds.add(id)
     }
-    const rgbas = renderLayout(currentSessions, { errorSessionIds, effortBySession })
+    // Apply optimistic overlays over the real broadcast state. Fresh entries
+    // win; expired ones fall through to whatever the sidecar last sent.
+    const effective = getEffectiveSessions(currentSessions, optimisticStates, now, OPTIMISTIC_HOLD_MS)
+    const rgbas = renderLayout(effective, { errorSessionIds, effortBySession })
     for (let i = 0; i < rgbas.length; i++) {
       try {
         await keypad.paintKey(i, rgbas[i])
@@ -72,11 +77,9 @@ await repaint()
 
 const sidecar = new SidecarClient(SIDECAR_URL)
 sidecar.on('sessions', (sessions: SessionStatus[]) => {
-  // Cap at 3 visible (FIFO), then merge with any in-flight optimistic state.
-  const incoming = sessions.slice(0, 3)
-  currentSessions = mergeWithOptimistic(
-    incoming, currentSessions, optimisticAt, Date.now(), OPTIMISTIC_HOLD_MS,
-  )
+  // Cap at 3 visible (FIFO). Real state replaces wholesale — optimistic
+  // overlays live in the separate map and are applied at paint time.
+  currentSessions = sessions.slice(0, 3)
   void repaint()
 })
 sidecar.on('close', () => {
@@ -88,9 +91,9 @@ sidecar.on('command-result', (res: CommandResult) => {
   if (res.success) return
   console.error(`[keypad] command failed: ${res.sessionId.slice(0, 8)}… ${res.command} — ${res.error ?? 'unknown'}`)
   errors = recordError(errors, res.sessionId, res.command, Date.now(), res.error)
-  // Clear the optimistic hold for this session so the real state shows
-  // through on the next broadcast (no more lying-thinking-dots).
-  optimisticAt.delete(res.sessionId)
+  // Drop the optimistic overlay so the real state shows immediately
+  // (no more lying-thinking-dots while the user has nothing to do).
+  optimisticStates.delete(res.sessionId)
   void repaint()
 })
 
@@ -131,8 +134,11 @@ keypad.on('press', (evt: PressEvent) => {
   if (!command) return
   console.log(`[keypad] col ${col} (${session.session_id.slice(0, 8)}…) state=${session.state} → ${command}`)
   sidecar.sendCommand(session.session_id, command)
-  currentSessions = applyOptimisticUpdate(currentSessions, session.session_id, command)
-  optimisticAt.set(session.session_id, Date.now())
+  // Optimistic visual feedback: continue (Approve press) flips to thinking
+  // so dots show immediately. Focus doesn't change state.
+  if (command === 'continue') {
+    optimisticStates.set(session.session_id, { state: 'thinking', at: Date.now() })
+  }
   void repaint()
 })
 

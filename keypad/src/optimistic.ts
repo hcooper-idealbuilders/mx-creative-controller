@@ -1,52 +1,51 @@
-// Apply an optimistic local state update on a keypad button press, so the
-// LCDs reflect the user's action immediately instead of waiting for Claude
-// Code to fire its next hook event (which may be many seconds away — Approve
-// in particular doesn't have a follow-up event until Claude finishes or asks
-// again).
+// Optimistic state overlay for keypad presses.
 //
-// The next real `{ type: 'sessions' }` broadcast from the sidecar always
-// supersedes this, so it's safe — worst case it's right for a moment and
-// then corrected.
-import type { SessionStatus, Command } from './state.js'
+// When the user presses a button, we want the LCD to show feedback
+// immediately, before the keystroke has had time to fly through the
+// sidecar → terminal → Claude → hook chain. We track a separate overlay
+// map keyed by session_id; entries time out after `holdMs` and the real
+// state shows through.
+//
+// Crucially we do NOT mutate the canonical `sessions` array — if the
+// keystroke fails to actually reach Claude (no follow-up hook fires,
+// no new broadcast arrives), the overlay still expires naturally on
+// the next paint after holdMs. Old approach mutated `currentSessions`
+// in place and could get stuck on the optimistic state forever.
+import type { SessionStatus, SessionState } from './state.js'
 
-export function applyOptimisticUpdate(
-  sessions: ReadonlyArray<SessionStatus>,
-  sessionId: string,
-  command: Command,
-): SessionStatus[] {
-  // continue (Approve) puts Claude back to work — flip to thinking
-  if (command === 'continue') {
-    return sessions.map((s) =>
-      s.session_id === sessionId
-        ? { ...s, state: 'thinking', last_event: 'optimistic:continue' }
-        : s,
-    )
-  }
-  // focus doesn't change state
-  return sessions.slice()
+export interface OptimisticEntry {
+  state: SessionState
+  at: number
 }
 
 /**
- * Merge an incoming `sessions` broadcast with the keypad's current local state,
- * honoring the optimistic-hold window so a fresh button-press isn't immediately
- * wiped out by a status broadcast that's already in flight.
- *
- * If a session was optimistically updated less than `holdMs` ago, we keep the
- * local copy of that session. Otherwise we accept the incoming version.
+ * Combine real session state with the per-session optimistic overlays.
+ * Fresh entries override; stale or absent entries fall through.
  */
-export function mergeWithOptimistic(
-  incoming: ReadonlyArray<SessionStatus>,
-  local: ReadonlyArray<SessionStatus>,
-  optimisticAt: ReadonlyMap<string, number>,
+export function getEffectiveSessions(
+  real: ReadonlyArray<SessionStatus>,
+  optimistic: ReadonlyMap<string, OptimisticEntry>,
   now: number,
   holdMs: number,
 ): SessionStatus[] {
-  return incoming.map((s) => {
-    const lastOpt = optimisticAt.get(s.session_id) ?? 0
-    if (now - lastOpt < holdMs) {
-      const lcl = local.find((c) => c.session_id === s.session_id)
-      if (lcl) return lcl
+  return real.map((s) => {
+    const opt = optimistic.get(s.session_id)
+    if (opt && now - opt.at < holdMs) {
+      return { ...s, state: opt.state }
     }
     return s
   })
+}
+
+/** Drop optimistic entries that are older than the hold window. Pure. */
+export function pruneOptimistic(
+  optimistic: ReadonlyMap<string, OptimisticEntry>,
+  now: number,
+  holdMs: number,
+): Map<string, OptimisticEntry> {
+  const next = new Map<string, OptimisticEntry>()
+  for (const [id, e] of optimistic) {
+    if (now - e.at < holdMs) next.set(id, e)
+  }
+  return next
 }
