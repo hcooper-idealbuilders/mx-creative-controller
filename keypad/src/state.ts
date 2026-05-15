@@ -14,6 +14,12 @@ export interface SessionStatus {
   first_seen: string | null
   last_event: string | null
   last_updated: string | null
+  /**
+   * Verbatim Notification payload message (null on non-Notification events).
+   * Gates Approve so it only enables when the prompt looks like a permission
+   * request for the current task, not an open-ended direction-change question.
+   */
+  notification_message: string | null
 }
 
 // Commands sent from the keypad to the sidecar. The sidecar maps these to

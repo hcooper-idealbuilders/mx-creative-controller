@@ -80,6 +80,13 @@ export function renderStatusKey(
   const { canvas, ctx } = makeCanvas(bg)
   const cx = KEY / 2
 
+  // Tinted Claude mark sitting behind the text — gives the colored tile a
+  // sense of depth without competing with the label. Skipped in 'thinking'
+  // since the pulsing dots are the focal point there.
+  if (state !== 'thinking') {
+    drawClaudeMark(ctx, cx, KEY / 2, 30, darken(bg, 0.7))
+  }
+
   // Row 1 — title (one word, max 12 chars). Always visible, including in
   // thinking state, so the user can still tell which session is which.
   ctx.fillStyle = '#ffffff'
@@ -125,6 +132,25 @@ function renderScreensaverTile(idx: number): Uint8Array {
   return toRgba(canvas)
 }
 
+/**
+ * Brief flurry shown when sessions transition from empty (screensaver) to
+ * non-empty. Each tile cycles through the screensaver palette, offset by
+ * its index so the keys feel like they're sweeping. After the window
+ * (~1.2s) the caller switches back to the normal status layout.
+ */
+export function renderStartupAnimation(elapsedMs: number): Uint8Array[] {
+  const colorsPerSecond = 10
+  const baseOffset = Math.floor((elapsedMs * colorsPerSecond) / 1000)
+  const out: Uint8Array[] = new Array(9)
+  for (let i = 0; i < 9; i++) {
+    const colorIdx = (i + baseOffset) % SCREENSAVER_PALETTE.length
+    const { canvas, ctx } = makeCanvas('#0a0a0a')
+    drawClaudeMark(ctx, KEY / 2, KEY / 2, 34, SCREENSAVER_PALETTE[colorIdx])
+    out[i] = toRgba(canvas)
+  }
+  return out
+}
+
 function darken(hex: string, factor: number): string {
   const m = /^#([0-9a-f]{6})$/i.exec(hex)
   if (!m) return hex
@@ -141,11 +167,16 @@ export function renderActionKey(
   options?: { error?: boolean },
 ): Uint8Array {
   const state   = session?.state ?? null
-  const enabled = isActionEnabled(state, role)
+  const enabled = isActionEnabled(state, role, session?.notification_message ?? null)
   const label   = actionLabel(state, role)
   const baseBg  = actionBg(state, role)
   const bg      = enabled ? baseBg : darken(baseBg, 0.4)
   const { canvas, ctx } = makeCanvas(bg)
+  // Tinted mark behind the label — same depth treatment as the status tile.
+  // Skipped on empty columns (no session) so blank tiles stay flat.
+  if (session) {
+    drawClaudeMark(ctx, KEY / 2, KEY / 2, 30, darken(bg, 0.7))
+  }
   if (label) {
     ctx.fillStyle = enabled ? '#ffffff' : '#888888'
     ctx.textAlign = 'center'
@@ -178,22 +209,24 @@ export function renderLayout(
     effortBySession?: ReadonlyMap<string, EffortLevel>
   },
 ): Uint8Array[] {
-  // No sessions at all — show the screensaver so the keypad still proves
-  // it's running. As soon as the first SessionStart hook fires we drop
-  // back to the normal 3-column layout.
-  if (sessions.length === 0) {
-    const out: Uint8Array[] = new Array(9)
-    for (let i = 0; i < 9; i++) out[i] = renderScreensaverTile(i)
-    return out
-  }
-
+  // Per-column: occupied columns render their session's status + action keys;
+  // empty columns get the rainbow Claude-mark screensaver across all 3 rows
+  // so the keypad keeps proving it's alive even with 1–2 active sessions.
+  // The palette index is `row*3 + col`, matching the no-sessions layout, so
+  // the unused slots stay color-coherent with the full screensaver.
   const errSet = options?.errorSessionIds ?? new Set<string>()
   const effortMap = options?.effortBySession
   const out: Uint8Array[] = new Array(9)
   for (let col = 0; col < 3; col++) {
     const s = sessions[col] ?? null
-    const err = s ? errSet.has(s.session_id) : false
-    const effort = s ? (effortMap?.get(s.session_id) ?? null) : null
+    if (!s) {
+      out[0 + col] = renderScreensaverTile(0 + col)
+      out[3 + col] = renderScreensaverTile(3 + col)
+      out[6 + col] = renderScreensaverTile(6 + col)
+      continue
+    }
+    const err = errSet.has(s.session_id)
+    const effort = effortMap?.get(s.session_id) ?? null
     out[0 + col] = renderStatusKey(s, { error: err, effort })
     out[3 + col] = renderActionKey(s, 'primary')
     out[6 + col] = renderActionKey(s, 'secondary')

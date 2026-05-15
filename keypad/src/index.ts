@@ -6,7 +6,7 @@
 //   row 2 — secondary action (Focus / Dismiss per state)
 import { MxKeypad, type PressEvent } from './device.js'
 import { SidecarClient, type CommandResult } from './sidecar-client.js'
-import { renderLayout, needsAnimation } from './renderer.js'
+import { renderLayout, needsAnimation, renderStartupAnimation } from './renderer.js'
 import { getEffectiveSessions, pruneOptimistic, type OptimisticEntry } from './optimistic.js'
 import { isActionEnabled } from './labels.js'
 import {
@@ -35,6 +35,16 @@ let painting = false
 // failed keystroke (no follow-up hook ever fires) doesn't strand the LCD.
 let optimisticStates = new Map<string, OptimisticEntry>()
 const OPTIMISTIC_HOLD_MS = 1500
+
+// Startup-animation tracking. We want a ~1.2s flurry only when a brand-new
+// Claude Code session appears (not on every hook event for an existing one).
+// Tracking session_ids — not just a count — guards us against the rename
+// race in update-status.ps1: the hook's Move-Item briefly looks like
+// "directory empty, then directory full of session X again" to fsWatch,
+// which would otherwise re-trigger the animation on every Approve/Stop.
+const seenSessionIds = new Set<string>()
+let animationStartedAt: number | null = null
+const STARTUP_ANIM_MS = 1200
 
 // Track recent command failures so the keypad can flash an error border
 // on a session whose press didn't reach Claude.
@@ -74,21 +84,34 @@ async function repaint() {
     const now = Date.now()
     errors = pruneErrors(errors, now, ERROR_DISPLAY_MS)
     optimisticStates = pruneOptimistic(optimisticStates, now, OPTIMISTIC_HOLD_MS)
-    const errorSessionIds = new Set<string>()
-    for (const [id] of errors) {
-      if (hasRecentError(id, errors, now, ERROR_DISPLAY_MS)) errorSessionIds.add(id)
+
+    // Startup flurry takes precedence over the normal layout while active.
+    let rgbas: Uint8Array[]
+    if (animationStartedAt !== null) {
+      const elapsed = now - animationStartedAt
+      if (elapsed < STARTUP_ANIM_MS) {
+        rgbas = renderStartupAnimation(elapsed)
+      } else {
+        animationStartedAt = null
+        rgbas = renderNormal()
+      }
+    } else {
+      rgbas = renderNormal()
     }
-    // Apply optimistic overlays over the real broadcast state. Fresh entries
-    // win; expired ones fall through to whatever the sidecar last sent.
-    const effective = getEffectiveSessions(currentSessions, optimisticStates, now, OPTIMISTIC_HOLD_MS)
-    // Effective effort = per-session override if set, else the global default
-    // read from settings.json at startup.
-    const effortView = new Map<string, EffortLevel>()
-    for (const s of effective) {
-      const e = effectiveEffort(s.session_id)
-      if (e) effortView.set(s.session_id, e)
+
+    function renderNormal(): Uint8Array[] {
+      const errorSessionIds = new Set<string>()
+      for (const [id] of errors) {
+        if (hasRecentError(id, errors, now, ERROR_DISPLAY_MS)) errorSessionIds.add(id)
+      }
+      const effective = getEffectiveSessions(currentSessions, optimisticStates, now, OPTIMISTIC_HOLD_MS)
+      const effortView = new Map<string, EffortLevel>()
+      for (const s of effective) {
+        const e = effectiveEffort(s.session_id)
+        if (e) effortView.set(s.session_id, e)
+      }
+      return renderLayout(effective, { errorSessionIds, effortBySession: effortView })
     }
-    const rgbas = renderLayout(effective, { errorSessionIds, effortBySession: effortView })
     for (let i = 0; i < rgbas.length; i++) {
       try {
         await keypad.paintKey(i, rgbas[i])
@@ -108,7 +131,18 @@ const sidecar = new SidecarClient(SIDECAR_URL)
 sidecar.on('sessions', (sessions: SessionStatus[]) => {
   // Cap at 3 visible (FIFO). Real state replaces wholesale — optimistic
   // overlays live in the separate map and are applied at paint time.
-  currentSessions = sessions.slice(0, 3)
+  const incoming = sessions.slice(0, 3)
+  // Animation only fires when an incoming session_id is one we've never
+  // seen in this keypad-service lifetime. Spurious empty broadcasts from
+  // the hook rename race deliver the *same* session_id back, so the set
+  // membership check filters them out cleanly.
+  const hasGenuinelyNew = incoming.some((s) => !seenSessionIds.has(s.session_id))
+  if (hasGenuinelyNew && animationStartedAt === null) {
+    animationStartedAt = Date.now()
+    console.log('[keypad] new session — playing startup flurry')
+  }
+  for (const s of incoming) seenSessionIds.add(s.session_id)
+  currentSessions = incoming
   void repaint()
 })
 sidecar.on('close', () => {
@@ -150,10 +184,12 @@ keypad.on('press', (evt: PressEvent) => {
     return
   }
   if (row === 1) {
-    // Primary only fires on waiting_input (sends 'continue', which the
-    // sidecar maps to an 'y⏎' approve keystroke).
-    if (!isActionEnabled(session.state, 'primary')) {
-      console.log(`[keypad] col ${col} state=${session.state}: primary disabled`)
+    // Primary only fires on waiting_input AND when the notification text
+    // looks like a permission prompt (per labels/isActionEnabled). Direction-
+    // change questions deliberately leave Approve greyed so a press here
+    // can't accidentally steer the work off course.
+    if (!isActionEnabled(session.state, 'primary', session.notification_message)) {
+      console.log(`[keypad] col ${col} state=${session.state} notif="${session.notification_message ?? ''}": primary disabled`)
       return
     }
     command = 'continue'
@@ -171,13 +207,17 @@ keypad.on('press', (evt: PressEvent) => {
   void repaint()
 })
 
-// Refresh tick. When any session is `thinking`, we paint faster so the dots
-// animate; otherwise the slower idle cadence keeps us recovered from Options+.
+// Refresh tick. We paint faster when something is animating (startup flurry
+// or any thinking session) so motion is smooth; otherwise the slower idle
+// cadence keeps us recovered from Options+ repaints.
 let lastInterval = IDLE_REFRESH_MS
 let timer: NodeJS.Timeout = setInterval(tick, IDLE_REFRESH_MS)
 function tick() {
   void repaint()
-  const desired = needsAnimation(currentSessions) ? ANIM_REFRESH_MS : IDLE_REFRESH_MS
+  const animating =
+    animationStartedAt !== null ||
+    needsAnimation(currentSessions)
+  const desired = animating ? ANIM_REFRESH_MS : IDLE_REFRESH_MS
   if (desired !== lastInterval) {
     clearInterval(timer)
     timer = setInterval(tick, desired)

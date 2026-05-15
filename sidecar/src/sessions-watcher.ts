@@ -33,6 +33,12 @@ export interface SessionStatus {
   first_seen: string | null
   last_event: string | null
   last_updated: string | null
+  /**
+   * Verbatim Notification payload message (cleared on non-Notification events).
+   * Used by the keypad to distinguish permission prompts (Approve = safe)
+   * from open-ended direction-change questions (Approve = unsafe).
+   */
+  notification_message: string | null
 }
 
 export class SessionsWatcher extends EventEmitter {

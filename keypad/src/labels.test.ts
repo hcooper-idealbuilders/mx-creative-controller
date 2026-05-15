@@ -57,8 +57,18 @@ describe('isActionEnabled', () => {
     expect(isActionEnabled('done', 'primary')).toBe(false)
   })
 
-  it('primary enabled only on waiting_input (Approve)', () => {
-    expect(isActionEnabled('waiting_input', 'primary')).toBe(true)
+  it('primary disabled on waiting_input without a notification message (safety default)', () => {
+    expect(isActionEnabled('waiting_input', 'primary')).toBe(false)
+    expect(isActionEnabled('waiting_input', 'primary', null)).toBe(false)
+    expect(isActionEnabled('waiting_input', 'primary', '')).toBe(false)
+  })
+
+  it('primary disabled on unrecognized notification (direction-change question)', () => {
+    expect(isActionEnabled('waiting_input', 'primary', 'Want me to refactor X instead?')).toBe(false)
+  })
+
+  it('primary enabled on a recognized tool-permission prompt', () => {
+    expect(isActionEnabled('waiting_input', 'primary', 'Claude needs your permission to use Bash')).toBe(true)
   })
 
   it('secondary (Focus) always enabled when a session exists', () => {

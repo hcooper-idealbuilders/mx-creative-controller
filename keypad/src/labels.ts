@@ -2,6 +2,7 @@
 // Extracted so we can unit-test "Approve vs Continue", "Resume vs Dismiss",
 // etc. without spinning up @napi-rs/canvas.
 import type { SessionState } from './state.js'
+import { isPermissionPrompt } from './notification.js'
 
 export type ActionRole = 'primary' | 'secondary'
 
@@ -23,14 +24,22 @@ export function actionBg(state: SessionState | null, role: ActionRole): string {
  * Whether the action button does something meaningful in the given state.
  * When false, the keypad dims the button and ignores presses.
  *
- * The keypad's job is to handle moments when Claude actually needs you —
- * not to type arbitrary prompts. So primary is enabled only when
- * waiting_input (→ Approve).
- *
  * Secondary (Focus) is always meaningful when a session exists.
+ *
+ * Primary (Approve) is gated more strictly than state alone — Claude fires
+ * Notification for both "permission to use Bash?" (safe to approve) and
+ * "want to refactor X instead?" (a direction-change disguised as a question).
+ * Approving the latter blindly would steer the work off course, so we
+ * require notificationMessage to positively match a known permission-prompt
+ * pattern. Unknown phrasing → disabled (safety default).
  */
-export function isActionEnabled(state: SessionState | null, role: ActionRole): boolean {
+export function isActionEnabled(
+  state: SessionState | null,
+  role: ActionRole,
+  notificationMessage?: string | null,
+): boolean {
   if (state === null) return false
   if (role === 'secondary') return true
-  return state === 'waiting_input'
+  if (state !== 'waiting_input') return false
+  return isPermissionPrompt(notificationMessage)
 }
