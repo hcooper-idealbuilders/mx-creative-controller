@@ -46,6 +46,15 @@ const seenSessionIds = new Set<string>()
 let animationStartedAt: number | null = null
 const STARTUP_ANIM_MS = 1200
 
+// Self-test results from the startup flurry. The flurry paints all 9 keys
+// back-to-back, which makes it the natural moment to notice if any key has
+// a USB hiccup, JPEG-encode glitch, or stale Col routing. Keys that throw
+// during that window get a red error border for SELF_TEST_DISPLAY_MS so the
+// user can see which one failed without watching console logs.
+const selfTestFailures = new Set<number>()
+let selfTestFailuresShownUntil: number | null = null
+const SELF_TEST_DISPLAY_MS = 5000
+
 // Track recent command failures so the keypad can flash an error border
 // on a session whose press didn't reach Claude.
 let errors = new Map<string, CommandError>()
@@ -85,14 +94,32 @@ async function repaint() {
     errors = pruneErrors(errors, now, ERROR_DISPLAY_MS)
     optimisticStates = pruneOptimistic(optimisticStates, now, OPTIMISTIC_HOLD_MS)
 
+    // Expire the self-test error display once its window has passed so the
+    // red borders eventually clear themselves even if no other repaint
+    // would otherwise overwrite them.
+    if (selfTestFailuresShownUntil !== null && now >= selfTestFailuresShownUntil) {
+      selfTestFailures.clear()
+      selfTestFailuresShownUntil = null
+    }
+
     // Startup flurry takes precedence over the normal layout while active.
+    // We also use the flurry as a self-test: paint failures get recorded
+    // here, then surfaced as red borders in the first normal layout.
     let rgbas: Uint8Array[]
+    let inFlurry = false
     if (animationStartedAt !== null) {
       const elapsed = now - animationStartedAt
       if (elapsed < STARTUP_ANIM_MS) {
         rgbas = renderStartupAnimation(elapsed)
+        inFlurry = true
       } else {
         animationStartedAt = null
+        if (selfTestFailures.size > 0) {
+          selfTestFailuresShownUntil = now + SELF_TEST_DISPLAY_MS
+          console.error(`[keypad] self-test FAILED on keys: ${[...selfTestFailures].sort().join(', ')}`)
+        } else {
+          console.log('[keypad] self-test OK — all 9 keys painted')
+        }
         rgbas = renderNormal()
       }
     } else {
@@ -110,13 +137,18 @@ async function repaint() {
         const e = effectiveEffort(s.session_id)
         if (e) effortView.set(s.session_id, e)
       }
-      return renderLayout(effective, { errorSessionIds, effortBySession: effortView })
+      const failedKeyIndices =
+        selfTestFailuresShownUntil !== null && now < selfTestFailuresShownUntil
+          ? selfTestFailures
+          : undefined
+      return renderLayout(effective, { errorSessionIds, effortBySession: effortView, failedKeyIndices })
     }
     for (let i = 0; i < rgbas.length; i++) {
       try {
         await keypad.paintKey(i, rgbas[i])
       } catch (err) {
         console.error(`[keypad] paint key ${i} failed:`, err)
+        if (inFlurry) selfTestFailures.add(i)
       }
     }
   } finally {

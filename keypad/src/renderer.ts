@@ -126,9 +126,10 @@ const SCREENSAVER_PALETTE: ReadonlyArray<string> = [
   '#8c4dff', '#ff4dcc', '#ffffff',
 ]
 
-function renderScreensaverTile(idx: number): Uint8Array {
+function renderScreensaverTile(idx: number, options?: { error?: boolean }): Uint8Array {
   const { canvas, ctx } = makeCanvas('#0a0a0a')
   drawClaudeMark(ctx, KEY / 2, KEY / 2, 34, SCREENSAVER_PALETTE[idx % SCREENSAVER_PALETTE.length])
+  if (options?.error) drawErrorBorder(ctx)
   return toRgba(canvas)
 }
 
@@ -207,6 +208,12 @@ export function renderLayout(
   options?: {
     errorSessionIds?: ReadonlySet<string>
     effortBySession?: ReadonlyMap<string, EffortLevel>
+    /**
+     * Per-key indices (0..8) that failed their paint during the startup
+     * self-test window. Each gets a red error border laid over whatever it
+     * would normally render — including screensaver tiles for empty columns.
+     */
+    failedKeyIndices?: ReadonlySet<number>
   },
 ): Uint8Array[] {
   // Per-column: occupied columns render their session's status + action keys;
@@ -216,20 +223,25 @@ export function renderLayout(
   // the unused slots stay color-coherent with the full screensaver.
   const errSet = options?.errorSessionIds ?? new Set<string>()
   const effortMap = options?.effortBySession
+  const failedKeys = options?.failedKeyIndices
   const out: Uint8Array[] = new Array(9)
   for (let col = 0; col < 3; col++) {
     const s = sessions[col] ?? null
+    const idxStatus = 0 + col, idxPrimary = 3 + col, idxSecondary = 6 + col
+    const failStatus    = failedKeys?.has(idxStatus)    ?? false
+    const failPrimary   = failedKeys?.has(idxPrimary)   ?? false
+    const failSecondary = failedKeys?.has(idxSecondary) ?? false
     if (!s) {
-      out[0 + col] = renderScreensaverTile(0 + col)
-      out[3 + col] = renderScreensaverTile(3 + col)
-      out[6 + col] = renderScreensaverTile(6 + col)
+      out[idxStatus]    = renderScreensaverTile(idxStatus,    { error: failStatus })
+      out[idxPrimary]   = renderScreensaverTile(idxPrimary,   { error: failPrimary })
+      out[idxSecondary] = renderScreensaverTile(idxSecondary, { error: failSecondary })
       continue
     }
-    const err = errSet.has(s.session_id)
+    const sessErr = errSet.has(s.session_id)
     const effort = effortMap?.get(s.session_id) ?? null
-    out[0 + col] = renderStatusKey(s, { error: err, effort })
-    out[3 + col] = renderActionKey(s, 'primary')
-    out[6 + col] = renderActionKey(s, 'secondary')
+    out[idxStatus]    = renderStatusKey(s, { error: sessErr || failStatus, effort })
+    out[idxPrimary]   = renderActionKey(s, 'primary',   { error: failPrimary })
+    out[idxSecondary] = renderActionKey(s, 'secondary', { error: failSecondary })
   }
   return out
 }
