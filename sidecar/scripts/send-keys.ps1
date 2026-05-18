@@ -110,9 +110,24 @@ if ($hwnd -eq [IntPtr]::Zero) {
     exit 2
 }
 
+# Capture the foreground window before we steal focus, so we can put it
+# back afterward. SendKeys::SendWait requires the target window to be in
+# the foreground — there's no in-place "type into HWND" path that works
+# reliably through Windows Terminal's ConPTY. The right user experience
+# is therefore: focus → type → restore. The 'focus' command intentionally
+# skips the restore (its whole point is to leave Claude in front).
+$prevForeground = if ($keys) { [MxWin32]::GetForegroundWindow() } else { [IntPtr]::Zero }
+
 Force-Foreground -Hwnd $hwnd
 Start-Sleep -Milliseconds 80
 
 if ($keys) {
     [System.Windows.Forms.SendKeys]::SendWait($keys)
+    # Restore prior foreground unless it was Claude itself (then there's
+    # nothing to restore). Brief settle so SendKeys finishes its synthetic
+    # input queue before we pull focus away.
+    if ($prevForeground -ne [IntPtr]::Zero -and $prevForeground -ne $hwnd) {
+        Start-Sleep -Milliseconds 40
+        Force-Foreground -Hwnd $prevForeground
+    }
 }

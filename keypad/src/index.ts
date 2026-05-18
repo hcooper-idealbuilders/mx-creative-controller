@@ -22,6 +22,25 @@ const keypad = new MxKeypad()
 await keypad.open()
 console.log('[keypad] device open')
 
+// Reconnect loop: when the MX Console is unplugged, device.ts marks itself
+// disconnected and emits 'disconnect'. We poll for the device to reappear
+// and resume painting as soon as open() succeeds again. The interval is
+// generous (2s) — replug detection doesn't need to be instant.
+const RECONNECT_INTERVAL_MS = 2000
+let reconnectTimer: NodeJS.Timeout | null = null
+keypad.on('disconnect', () => {
+  console.error('[keypad] device disconnected — waiting for replug')
+  if (reconnectTimer) return
+  reconnectTimer = setInterval(async () => {
+    const ok = await keypad.tryReopen()
+    if (!ok) return
+    console.log('[keypad] device reconnected')
+    clearInterval(reconnectTimer!)
+    reconnectTimer = null
+    void repaint()
+  }, RECONNECT_INTERVAL_MS)
+})
+
 let currentSessions: SessionStatus[] = []
 let painting = false
 
@@ -258,6 +277,7 @@ console.log(`[keypad] refresh: ${IDLE_REFRESH_MS}ms idle / ${ANIM_REFRESH_MS}ms 
 process.on('SIGINT', async () => {
   console.log('\n[keypad] closing...')
   clearInterval(timer)
+  if (reconnectTimer) clearInterval(reconnectTimer)
   sidecar.close()
   await keypad.close()
   process.exit(0)
