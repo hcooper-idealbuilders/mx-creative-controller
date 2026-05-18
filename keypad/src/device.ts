@@ -35,7 +35,13 @@ const LCD_CONTROLS = CONTROLS.filter(
     c.feedbackType === 'lcd',
 )
 
-export type PressEvent = { kind: 'down' | 'up'; control: ButtonControl }
+export type PressEvent = { kind: 'down' | 'up' | 'long-press'; control: ButtonControl }
+
+/**
+ * Hold threshold for the long-press gesture. Below ~350ms feels twitchy;
+ * much above ~500ms users start complaining a press "didn't register."
+ */
+const LONG_PRESS_MS = 450
 
 export class MxKeypad extends EventEmitter {
   private col1: HIDAsync | null = null
@@ -45,6 +51,8 @@ export class MxKeypad extends EventEmitter {
   private packer = new JpegButtonLcdImagePacker((buf, w, h) => encodeJPEG(buf, w, h, undefined))
   private byHidId = new Map(CONTROLS.map((c) => [c.hidId, c]))
   private pressedLcd = new Set<number>()
+  /** hidId → pending long-press timer, cleared on release or fire. */
+  private holdTimers = new Map<number, NodeJS.Timeout>()
   private connected = false
 
   /** True between a successful open() and a detected disconnect. */
@@ -156,11 +164,21 @@ export class MxKeypad extends EventEmitter {
   private diffPress(prev: Set<number>, now: Set<number>): void {
     for (const id of prev) if (!now.has(id)) {
       prev.delete(id)
+      // Cancel any pending long-press for this key — release wins.
+      const t = this.holdTimers.get(id)
+      if (t) { clearTimeout(t); this.holdTimers.delete(id) }
       this.emit('press', { kind: 'up', control: this.byHidId.get(id)! })
     }
     for (const id of now) if (!prev.has(id)) {
       prev.add(id)
-      this.emit('press', { kind: 'down', control: this.byHidId.get(id)! })
+      const control = this.byHidId.get(id)!
+      this.emit('press', { kind: 'down', control })
+      // Arm a long-press; if 'up' arrives first, the timer is cleared above.
+      const timer = setTimeout(() => {
+        this.holdTimers.delete(id)
+        this.emit('press', { kind: 'long-press', control })
+      }, LONG_PRESS_MS)
+      this.holdTimers.set(id, timer)
     }
   }
 }

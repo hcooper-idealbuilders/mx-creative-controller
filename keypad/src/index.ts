@@ -211,26 +211,42 @@ sidecar.on('command-result', (res: CommandResult) => {
 
 sidecar.connect()
 
+// Tracks row-0 keys whose long-press already fired this hold, so the
+// follow-up 'up' event doesn't *also* cycle effort. Cleared on each 'up'.
+const longPressFired = new Set<number>()
+
 // Press dispatcher — map key index → (column, row) → command + session.
 keypad.on('press', (evt: PressEvent) => {
-  if (evt.kind !== 'down') return
   const idx = evt.control.index
   const col = idx % 3
   const row = Math.floor(idx / 3)
   const session = currentSessions[col]
   if (!session) return
 
-  let command: Command | null = null
+  // Row 0 has two gestures (tap → cycle effort, long-press → /fast) so it
+  // fires on 'up' / 'long-press' rather than 'down'. Rows 1 & 2 keep firing
+  // on 'down' for snappiness — they don't have a long-press behavior.
   if (row === 0) {
-    // Status key cycles per-session effort level.
-    const next = nextEffort(effortBySession.get(session.session_id) ?? null)
-    effortBySession.set(session.session_id, next)
-    const effortCmd = `effort-${next}` as Command
-    console.log(`[keypad] col ${col} (${session.session_id.slice(0, 8)}…) effort → ${next}`)
-    sidecar.sendCommand(session.session_id, effortCmd)
-    void repaint()
+    if (evt.kind === 'long-press') {
+      longPressFired.add(idx)
+      console.log(`[keypad] col ${col} (${session.session_id.slice(0, 8)}…) long-press → /fast`)
+      sidecar.sendCommand(session.session_id, 'fast')
+      return
+    }
+    if (evt.kind === 'up') {
+      if (longPressFired.delete(idx)) return  // long-press handled it
+      const next = nextEffort(effortBySession.get(session.session_id) ?? null)
+      effortBySession.set(session.session_id, next)
+      console.log(`[keypad] col ${col} (${session.session_id.slice(0, 8)}…) effort → ${next}`)
+      sidecar.sendCommand(session.session_id, `effort-${next}` as Command)
+      void repaint()
+    }
     return
   }
+
+  if (evt.kind !== 'down') return
+
+  let command: Command | null = null
   if (row === 1) {
     // Primary only fires on waiting_input AND when the notification text
     // looks like a permission prompt (per labels/isActionEnabled). Direction-

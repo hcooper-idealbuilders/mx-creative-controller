@@ -1,6 +1,6 @@
 param(
     [Parameter(Mandatory=$true)]
-    [ValidateSet('approve','focus','effort-low','effort-medium','effort-high','effort-xhigh')]
+    [ValidateSet('approve','focus','fast','effort-low','effort-medium','effort-high','effort-xhigh')]
     [string]$Command,
 
     [int]$ClaudePid,
@@ -23,6 +23,7 @@ $keys = switch ($Command) {
     # silently dropped.
     'approve'       { '1{ENTER}' }
     'focus'         { $null }
+    'fast'          { '/fast{ENTER}' }
     'effort-low'    { '/effort low{ENTER}' }
     'effort-medium' { '/effort medium{ENTER}' }
     'effort-high'   { '/effort high{ENTER}' }

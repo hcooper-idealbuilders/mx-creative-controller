@@ -16,8 +16,9 @@ const EFFORT_COMMANDS = new Set<string>([
 
 /**
  * Map a keypad command + session state to the actual side effect.
- *   continue + waiting_input → approve  (sends `y⏎`)
- *   focus                    → focus    (focus window, no keys)
+ *   continue + waiting_input → approve         (sends `1⏎`)
+ *   focus                    → focus           (focus window, no keys)
+ *   fast                     → fast            (sends `/fast⏎`)
  *   effort-<level>           → effort-<level>  (sends `/effort <level>⏎`)
  *
  * The keypad's primary button is gated by isActionEnabled and only
@@ -28,6 +29,7 @@ export function routeCommand(command: string, state: SessionState): RoutingResul
     return { kind: 'keystroke', keystroke: 'approve' }
   }
   if (command === 'focus') return { kind: 'keystroke', keystroke: 'focus' }
+  if (command === 'fast')  return { kind: 'keystroke', keystroke: 'fast' }
   if (EFFORT_COMMANDS.has(command)) {
     return { kind: 'keystroke', keystroke: command as KeystrokeCommand }
   }

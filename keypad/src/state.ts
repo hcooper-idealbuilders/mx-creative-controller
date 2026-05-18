@@ -12,9 +12,11 @@ export type { SessionState, SessionStatus }
 //   continue + state=waiting_input → '1⏎' (Claude Code's numbered "Yes")
 //   focus                          → focus window only
 //   effort-<level>                 → /effort <level>⏎
+//   fast                           → /fast⏎ (toggles Claude's fast mode)
 export type Command =
   | 'continue'
   | 'focus'
+  | 'fast'
   | 'effort-low'
   | 'effort-medium'
   | 'effort-high'
