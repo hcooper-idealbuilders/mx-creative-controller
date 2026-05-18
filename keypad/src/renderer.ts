@@ -1,11 +1,12 @@
 // Render one of the 9 keys (3×3 grid):
 //   row 0 — status icon (Anthropic-style mark, colored by session state)
-//   row 1 — primary action (Continue / Approve / Resume)
-//   row 2 — secondary action (Focus / Dismiss)
+//   row 1 — primary action (Continue / Approve)
+//   row 2 — secondary action (Focus)
 //
-// All sessions render their own column. Empty columns render dark.
+// All sessions render their own column. Empty columns render the rainbow
+// screensaver tiles so the keypad never looks half-dead.
 import { Canvas, type SKRSContext2D, createCanvas } from '@napi-rs/canvas'
-import { type SessionStatus, type SessionState, STATE_COLOR, STATE_BG } from './state.js'
+import { type SessionStatus, STATE_BG } from './state.js'
 import { actionLabel, actionBg, isActionEnabled, type ActionRole } from './labels.js'
 import { type EffortLevel, effortLabel } from './effort.js'
 import { formatTitle, formatModel } from './format.js'

@@ -1,46 +1,39 @@
 // Track recent command failures per session so the keypad can flash an
-// error indicator when a press didn't reach Claude.
-import type { Command } from './state.js'
-
-export interface CommandError {
-  command: Command
-  at: number          // Date.now() of the failure
-  message?: string
-}
+// error indicator when a press didn't reach Claude. We only need the
+// timestamp of the most recent failure — the command and error message
+// already go to stderr via the caller.
 
 /** True if the session has an error recorded within the last `windowMs`. */
 export function hasRecentError(
   sessionId: string,
-  errors: ReadonlyMap<string, CommandError>,
+  errors: ReadonlyMap<string, number>,
   now: number,
   windowMs: number,
 ): boolean {
-  const e = errors.get(sessionId)
-  return !!e && now - e.at < windowMs
+  const at = errors.get(sessionId)
+  return at !== undefined && now - at < windowMs
 }
 
 /** Add or update the error record for a session. Returns a fresh Map (immutable). */
 export function recordError(
-  errors: ReadonlyMap<string, CommandError>,
+  errors: ReadonlyMap<string, number>,
   sessionId: string,
-  command: Command,
   at: number,
-  message?: string,
-): Map<string, CommandError> {
+): Map<string, number> {
   const next = new Map(errors)
-  next.set(sessionId, { command, at, message })
+  next.set(sessionId, at)
   return next
 }
 
 /** Drop expired entries. Useful for periodic cleanup so the map doesn't grow. */
 export function pruneErrors(
-  errors: ReadonlyMap<string, CommandError>,
+  errors: ReadonlyMap<string, number>,
   now: number,
   windowMs: number,
-): Map<string, CommandError> {
-  const next = new Map<string, CommandError>()
-  for (const [id, e] of errors) {
-    if (now - e.at < windowMs) next.set(id, e)
+): Map<string, number> {
+  const next = new Map<string, number>()
+  for (const [id, at] of errors) {
+    if (now - at < windowMs) next.set(id, at)
   }
   return next
 }

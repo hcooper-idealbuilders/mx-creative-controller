@@ -1,6 +1,6 @@
 # mx-creative-controller
 
-A hardware controller for [Claude Code](https://claude.com/claude-code) built on top of the Logitech MX Creative Console. Live status from up to three concurrent Claude sessions across the keypad, plus hardware buttons for Continue / Approve / Focus / Resume / Dismiss — all working *while Logi Options+ is still running and managing the dialpad*.
+A hardware controller for [Claude Code](https://claude.com/claude-code) built on top of the Logitech MX Creative Console. Live status from up to three concurrent Claude sessions across the keypad, plus hardware buttons for Approve and Focus — all working *while Logi Options+ is still running and managing the dialpad*.
 
 This repo is also the public journal of getting there — including the dead ends. See [`docs/journal/`](docs/journal/) for the story.
 
@@ -9,25 +9,25 @@ This repo is also the public journal of getting there — including the dead end
 ```
                        ╔═══════════╤═══════════╤═══════════╗
 row 0 — status         ║   ✦ S₀    │   ✦ S₁    │   ✦ S₂    ║
-row 1 — primary        ║ Continue  │ Continue  │ Continue  ║
+row 1 — primary        ║  Approve  │  Approve  │  Approve  ║
 row 2 — secondary      ║   Focus   │   Focus   │   Focus   ║
                        ╚═══════════╧═══════════╧═══════════╝
 ```
 
-Each column is one Claude session, assigned FIFO. The status mark in row 0 is tinted by session state:
+Each column is one Claude session, assigned FIFO. Empty columns render rainbow Claude-mark screensaver tiles. The status mark in row 0 is tinted by session state:
 
 | State           | Mark                   | Trigger |
 |-----------------|------------------------|---------|
-| `idle`          | gray Claude mark       | SessionStart |
-| `thinking`      | **two pulsing dots**   | UserPromptSubmit |
+| `idle`          | green Claude mark      | SessionStart |
+| `thinking`      | **two pulsing dots**   | UserPromptSubmit / PreToolUse |
 | `waiting_input` | orange Claude mark     | Notification |
 | `done`          | green Claude mark      | Stop |
-| `ended`         | red Claude mark        | SessionEnd |
 
-Row 1 / row 2 labels swap with state:
+SessionEnd deletes the session file outright — ended sessions don't display.
 
-- alive: `Continue` (smart — sends `y⏎` on `waiting_input`, otherwise `continue⏎`) / `Focus`
-- ended: `Resume` (sends `/resume⏎`) / `Dismiss` (frees the column)
+- **row 0 (status)** — press cycles per-session effort level (low → medium → high → xhigh) via `/effort`.
+- **row 1 (Approve)** — enabled only on `waiting_input` *and* when the notification text matches a known permission-prompt pattern (e.g. `"Claude needs your permission to use …"`). Direction-change questions leave the button greyed so an accidental press can't steer the work off course. Approve sends `1⏎` (Claude Code's numbered "Yes" option).
+- **row 2 (Focus)** — focuses the terminal hosting that session.
 
 ## Architecture
 

@@ -1,12 +1,29 @@
 import { EventEmitter } from 'node:events'
 import WebSocket from 'ws'
-import type { SessionStatus, Command } from './state.js'
+import type { SessionStatus, SessionState, Command } from './state.js'
 
 export interface CommandResult {
   sessionId: string
   command: Command
   success: boolean
   error?: string
+}
+
+const VALID_STATES = new Set<SessionState>(['idle', 'thinking', 'done', 'waiting_input'])
+
+/**
+ * Drop sessions whose state isn't one we currently render — e.g. a stray
+ * 'ended' from a session.json that survived an older schema. Without this
+ * guard, `STATE_BG[state]` returns undefined in the renderer and the tile
+ * silently fails to paint a background.
+ */
+function sanitizeSessions(arr: unknown): SessionStatus[] {
+  if (!Array.isArray(arr)) return []
+  return arr.filter((s): s is SessionStatus =>
+    !!s && typeof s === 'object'
+       && typeof (s as { session_id?: unknown }).session_id === 'string'
+       && VALID_STATES.has((s as { state: SessionState }).state),
+  )
 }
 
 export class SidecarClient extends EventEmitter {
@@ -27,8 +44,8 @@ export class SidecarClient extends EventEmitter {
     this.ws.on('message', (data) => {
       try {
         const msg = JSON.parse(data.toString()) as Record<string, unknown>
-        if (msg.type === 'sessions' && Array.isArray(msg.sessions)) {
-          this.emit('sessions', msg.sessions as SessionStatus[])
+        if (msg.type === 'sessions') {
+          this.emit('sessions', sanitizeSessions(msg.sessions))
         } else if (msg.type === 'command-result' && typeof msg.sessionId === 'string') {
           this.emit('command-result', {
             sessionId: msg.sessionId,

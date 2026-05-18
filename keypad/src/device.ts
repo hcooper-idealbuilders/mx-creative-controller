@@ -23,12 +23,12 @@ interface ButtonControl {
   pixelPosition?: { x: number; y: number }
 }
 
-// Same keypad model the lib uses internally.
-const CONTROLS = freezeDefinitions([
-  ...generateButtonsGrid(3, 3, { width: 118, height: 118 }, { x: 23, y: 6 }, { x: 40, y: 40 }),
-  { type: 'button', row: 3, column: 0, index: 9,  hidId: 0x01a1, feedbackType: 'none' },
-  { type: 'button', row: 3, column: 1, index: 10, hidId: 0x01a2, feedbackType: 'none' },
-]) as ReadonlyArray<ButtonControl>
+// Same keypad model the lib uses internally. We only consume the 3×3 LCD
+// grid (indices 0..8); the device's two row-3 page buttons fire HID++ short
+// reports but we don't bind them, so they're omitted from CONTROLS.
+const CONTROLS = freezeDefinitions(
+  generateButtonsGrid(3, 3, { width: 118, height: 118 }, { x: 23, y: 6 }, { x: 40, y: 40 }),
+) as ReadonlyArray<ButtonControl>
 
 const LCD_CONTROLS = CONTROLS.filter(
   (c): c is ButtonControl & { pixelSize: { width: number; height: number }; pixelPosition: { x: number; y: number } } =>
@@ -45,7 +45,6 @@ export class MxKeypad extends EventEmitter {
   private packer = new JpegButtonLcdImagePacker((buf, w, h) => encodeJPEG(buf, w, h, undefined))
   private byHidId = new Map(CONTROLS.map((c) => [c.hidId, c]))
   private pressedLcd = new Set<number>()
-  private pressedPage = new Set<number>()
 
   async open(): Promise<void> {
     const devices = await HID.devicesAsync()
@@ -57,10 +56,12 @@ export class MxKeypad extends EventEmitter {
       if (!d) throw new Error(`MX Creative Keypad HID path not found for usage 0x${usage.toString(16)}`)
       return d.path!
     }
+    // col1 is opened (some Logitech firmware expects all three collections
+    // claimed before LCD writes go through) but we don't listen — short
+    // HID++ reports are only used by the unbound row-3 page buttons.
     this.col1 = await HID.HIDAsync.open(find(0x1a02))
     this.col2 = await HID.HIDAsync.open(find(0x1a08))
     this.col3 = await HID.HIDAsync.open(find(0x1a10))
-    this.col1.on('data', (buf) => this.parseShortInput(buf))
     this.col2.on('data', (buf) => this.parseLongInput(buf))
   }
 
@@ -101,19 +102,6 @@ export class MxKeypad extends EventEmitter {
       if (this.byHidId.has(v)) now.add(v)
     }
     this.diffPress(this.pressedLcd, now)
-  }
-
-  private parseShortInput(buf: Buffer): void {
-    const offset = buf[0] === 0x11 ? 1 : 0
-    const d = buf.subarray(offset)
-    if (d[0] !== 0xff || d[1] !== 0x0b || d[2] !== 0x00) return
-    const now = new Set<number>()
-    for (let i = 3; i + 1 < d.length; i += 2) {
-      const v = d.readUInt16BE(i)
-      if (v === 0) break
-      if (this.byHidId.has(v)) now.add(v)
-    }
-    this.diffPress(this.pressedPage, now)
   }
 
   private diffPress(prev: Set<number>, now: Set<number>): void {

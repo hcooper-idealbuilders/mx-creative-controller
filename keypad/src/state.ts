@@ -1,30 +1,15 @@
 // Multi-session types + per-state colors for the keypad layout.
+//
+// SessionState / SessionStatus live in `shared/types.ts` so the sidecar's
+// producer side and this consumer side can't drift; we re-export them here
+// so the rest of the keypad keeps importing from a single local module.
 
-export type SessionState = 'idle' | 'thinking' | 'done' | 'waiting_input'
-
-export interface SessionStatus {
-  state: SessionState
-  project: string | null
-  model: string | null
-  fast_mode: boolean
-  session_id: string
-  claude_pid: number | null
-  /** Captured at hook time; preferred over claude_pid when targeting a window. */
-  claude_hwnd: number | null
-  first_seen: string | null
-  last_event: string | null
-  last_updated: string | null
-  /**
-   * Verbatim Notification payload message (null on non-Notification events).
-   * Gates Approve so it only enables when the prompt looks like a permission
-   * request for the current task, not an open-ended direction-change question.
-   */
-  notification_message: string | null
-}
+import type { SessionState, SessionStatus } from '../../shared/types'
+export type { SessionState, SessionStatus }
 
 // Commands sent from the keypad to the sidecar. The sidecar maps these to
 // actual keystrokes:
-//   continue + state=waiting_input → 'y⏎'
+//   continue + state=waiting_input → '1⏎' (Claude Code's numbered "Yes")
 //   focus                          → focus window only
 //   effort-<level>                 → /effort <level>⏎
 export type Command =
@@ -45,15 +30,3 @@ export const STATE_BG: Record<SessionState, string> = {
   waiting_input: '#cc7000',
   done:          '#1f7a3a',
 }
-
-// Claude-mark color per state — a darker shade of the background so the
-// logo reads as a "tinted emboss" rather than a high-contrast icon.
-export const STATE_COLOR: Record<SessionState, string> = {
-  idle:          '#0e4f24',
-  thinking:      '#cccccc', // unused — dots are drawn instead of a mark
-  waiting_input: '#7a3c00',
-  done:          '#0e4f24',
-}
-
-export const KEYPAD_COLS = 3
-export const KEYPAD_ROWS = 3

@@ -1,6 +1,6 @@
 // Pure decision functions used by the renderer.
-// Extracted so we can unit-test "Approve vs Continue", "Resume vs Dismiss",
-// etc. without spinning up @napi-rs/canvas.
+// Extracted so we can unit-test Approve/Continue gating and the Focus
+// button's role without spinning up @napi-rs/canvas.
 import type { SessionState } from './state.js'
 import { isPermissionPrompt } from './notification.js'
 

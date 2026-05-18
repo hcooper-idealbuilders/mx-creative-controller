@@ -15,16 +15,6 @@ export function nextEffort(current: EffortLevel | null): EffortLevel {
   return CYCLE[(idx + 1) % CYCLE.length]
 }
 
-/** Short label for display on the status key. */
-export function effortShort(level: EffortLevel): string {
-  switch (level) {
-    case 'low':    return 'L'
-    case 'medium': return 'M'
-    case 'high':   return 'H'
-    case 'xhigh':  return 'X'
-  }
-}
-
 /** Display word for the bottom row of the status tile. */
 export function effortLabel(level: EffortLevel): string {
   switch (level) {

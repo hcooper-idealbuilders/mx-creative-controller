@@ -2,8 +2,9 @@ import { EventEmitter } from 'node:events'
 import { readdir, readFile, unlink, mkdir } from 'node:fs/promises'
 import { watch as fsWatch, existsSync } from 'node:fs'
 import { join } from 'node:path'
+import type { SessionState, SessionStatus } from '../../shared/types'
 
-export type SessionState = 'idle' | 'thinking' | 'done' | 'waiting_input'
+export type { SessionState, SessionStatus }
 
 /**
  * Sessions whose last_updated is older than this are considered abandoned
@@ -19,26 +20,6 @@ export function isStale(lastUpdated: string | null, now: number, thresholdMs = S
   const t = Date.parse(lastUpdated)
   if (Number.isNaN(t)) return false
   return now - t > thresholdMs
-}
-
-export interface SessionStatus {
-  state: SessionState
-  project: string | null
-  model: string | null
-  fast_mode: boolean
-  session_id: string
-  claude_pid: number | null
-  /** Captured at hook time; preferred over claude_pid when sending keystrokes. */
-  claude_hwnd: number | null
-  first_seen: string | null
-  last_event: string | null
-  last_updated: string | null
-  /**
-   * Verbatim Notification payload message (cleared on non-Notification events).
-   * Used by the keypad to distinguish permission prompts (Approve = safe)
-   * from open-ended direction-change questions (Approve = unsafe).
-   */
-  notification_message: string | null
 }
 
 export class SessionsWatcher extends EventEmitter {
@@ -106,15 +87,5 @@ export class SessionsWatcher extends EventEmitter {
 
   getBySessionId(id: string): SessionStatus | null {
     return this.sessions.find((s) => s.session_id === id) ?? null
-  }
-
-  /** Remove a session's file from disk; used by the "dismiss" command. */
-  async dismiss(sessionId: string): Promise<void> {
-    const safe = sessionId.replace(/[\\/]/g, '')
-    if (!safe) return
-    const path = join(this.dir, `${safe}.json`)
-    if (existsSync(path)) {
-      await unlink(path).catch(() => {})
-    }
   }
 }

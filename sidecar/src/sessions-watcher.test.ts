@@ -108,19 +108,6 @@ describe('SessionsWatcher', () => {
     expect(watcher.sessions.map((s) => s.session_id)).toEqual(['bom'])
   })
 
-  it('dismiss() removes the session file from disk', async () => {
-    await writeSession('a', '2026-05-13T10:00:00Z')
-    watcher = new SessionsWatcher(dir)
-    await watcher.start()
-    expect(watcher.sessions.length).toBe(1)
-
-    await watcher.dismiss('a')
-
-    const fresh = new SessionsWatcher(dir)
-    await fresh.start()
-    expect(fresh.sessions.length).toBe(0)
-  })
-
   it('reload prunes sessions older than the stale threshold', async () => {
     const fresh = new Date(Date.now() - 60_000).toISOString() // 1 min old
     const stale = new Date(Date.now() - 3 * 60 * 60 * 1000).toISOString() // 3 hr old
@@ -146,16 +133,4 @@ describe('SessionsWatcher', () => {
     expect(remaining.map((f) => f.replace(/\.json$/, ''))).toEqual(['keep'])
   })
 
-  it('dismiss() ignores path-traversal attempts', async () => {
-    await writeSession('keep', '2026-05-13T10:00:00Z')
-    watcher = new SessionsWatcher(dir)
-    await watcher.start()
-
-    await watcher.dismiss('../keep')
-    await watcher.dismiss('')
-
-    const fresh = new SessionsWatcher(dir)
-    await fresh.start()
-    expect(fresh.sessions.map((s) => s.session_id)).toEqual(['keep'])
-  })
 })

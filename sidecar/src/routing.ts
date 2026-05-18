@@ -6,14 +6,6 @@
 import type { KeystrokeCommand } from './keystroke-sender.js'
 import type { SessionState } from './sessions-watcher.js'
 
-export type IncomingCommand =
-  | 'continue'
-  | 'focus'
-  | 'effort-low'
-  | 'effort-medium'
-  | 'effort-high'
-  | 'effort-xhigh'
-
 export type RoutingResult =
   | { kind: 'keystroke'; keystroke: KeystrokeCommand }
   | { kind: 'unknown' }

@@ -1,18 +1,15 @@
 // Multi-session keypad controller.
 //
 // Layout (3 cols × 3 rows; sessions are FIFO):
-//   row 0 — Claude mark per session, tinted by state
-//   row 1 — primary action  (Continue / Approve / Resume per state)
-//   row 2 — secondary action (Focus / Dismiss per state)
+//   row 0 — Claude mark per session, tinted by state; press cycles effort
+//   row 1 — primary action  (Approve when waiting_input + permission prompt)
+//   row 2 — secondary action (Focus)
 import { MxKeypad, type PressEvent } from './device.js'
 import { SidecarClient, type CommandResult } from './sidecar-client.js'
 import { renderLayout, needsAnimation, renderStartupAnimation } from './renderer.js'
 import { getEffectiveSessions, pruneOptimistic, type OptimisticEntry } from './optimistic.js'
 import { isActionEnabled } from './labels.js'
-import {
-  hasRecentError, recordError, pruneErrors,
-  type CommandError,
-} from './errors.js'
+import { recordError, pruneErrors } from './errors.js'
 import { nextEffort, type EffortLevel } from './effort.js'
 import type { Command, SessionStatus } from './state.js'
 import { readFileSync } from 'node:fs'
@@ -57,7 +54,7 @@ const SELF_TEST_DISPLAY_MS = 5000
 
 // Track recent command failures so the keypad can flash an error border
 // on a session whose press didn't reach Claude.
-let errors = new Map<string, CommandError>()
+let errors = new Map<string, number>()
 const ERROR_DISPLAY_MS = 2500
 
 // Track the effort level the keypad most recently set, per session.
@@ -84,6 +81,24 @@ console.log(`[keypad] default effort: ${defaultEffort ?? '(unknown)'}`)
 
 function effectiveEffort(sessionId: string): EffortLevel | null {
   return effortBySession.get(sessionId) ?? defaultEffort
+}
+
+// Compose the rgba buffers for the normal (non-flurry) layout. The error
+// set is just the pruned-map's keys — pruneErrors() already filtered to the
+// display window, so a second hasRecentError pass would be redundant.
+function renderNormalLayout(now: number): Uint8Array[] {
+  const errorSessionIds = new Set(errors.keys())
+  const effective = getEffectiveSessions(currentSessions, optimisticStates, now, OPTIMISTIC_HOLD_MS)
+  const effortView = new Map<string, EffortLevel>()
+  for (const s of effective) {
+    const e = effectiveEffort(s.session_id)
+    if (e) effortView.set(s.session_id, e)
+  }
+  const failedKeyIndices =
+    selfTestFailuresShownUntil !== null && now < selfTestFailuresShownUntil
+      ? selfTestFailures
+      : undefined
+  return renderLayout(effective, { errorSessionIds, effortBySession: effortView, failedKeyIndices })
 }
 
 async function repaint() {
@@ -120,29 +135,12 @@ async function repaint() {
         } else {
           console.log('[keypad] self-test OK — all 9 keys painted')
         }
-        rgbas = renderNormal()
+        rgbas = renderNormalLayout(now)
       }
     } else {
-      rgbas = renderNormal()
+      rgbas = renderNormalLayout(now)
     }
 
-    function renderNormal(): Uint8Array[] {
-      const errorSessionIds = new Set<string>()
-      for (const [id] of errors) {
-        if (hasRecentError(id, errors, now, ERROR_DISPLAY_MS)) errorSessionIds.add(id)
-      }
-      const effective = getEffectiveSessions(currentSessions, optimisticStates, now, OPTIMISTIC_HOLD_MS)
-      const effortView = new Map<string, EffortLevel>()
-      for (const s of effective) {
-        const e = effectiveEffort(s.session_id)
-        if (e) effortView.set(s.session_id, e)
-      }
-      const failedKeyIndices =
-        selfTestFailuresShownUntil !== null && now < selfTestFailuresShownUntil
-          ? selfTestFailures
-          : undefined
-      return renderLayout(effective, { errorSessionIds, effortBySession: effortView, failedKeyIndices })
-    }
     for (let i = 0; i < rgbas.length; i++) {
       try {
         await keypad.paintKey(i, rgbas[i])
@@ -185,7 +183,7 @@ sidecar.on('close', () => {
 sidecar.on('command-result', (res: CommandResult) => {
   if (res.success) return
   console.error(`[keypad] command failed: ${res.sessionId.slice(0, 8)}… ${res.command} — ${res.error ?? 'unknown'}`)
-  errors = recordError(errors, res.sessionId, res.command, Date.now(), res.error)
+  errors = recordError(errors, res.sessionId, Date.now())
   // Drop the optimistic overlay so the real state shows immediately
   // (no more lying-thinking-dots while the user has nothing to do).
   optimisticStates.delete(res.sessionId)
@@ -198,7 +196,6 @@ sidecar.connect()
 keypad.on('press', (evt: PressEvent) => {
   if (evt.kind !== 'down') return
   const idx = evt.control.index
-  if (idx < 0 || idx > 8) return
   const col = idx % 3
   const row = Math.floor(idx / 3)
   const session = currentSessions[col]
