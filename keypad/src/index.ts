@@ -19,14 +19,25 @@ const IDLE_REFRESH_MS = Number(process.env.MX_REFRESH_MS ?? 1000)
 const ANIM_REFRESH_MS = Number(process.env.MX_ANIM_MS ?? 200)
 
 const keypad = new MxKeypad()
-await keypad.open()
+
+// Poll interval for both startup and replug detection. Generous (2s) —
+// reconnect doesn't need to be instant.
+const RECONNECT_INTERVAL_MS = 2000
+
+// Wait for the device at startup instead of crashing. At logon this service
+// can come up before USB enumeration finishes — or with the console unplugged
+// entirely — and a bare open() here used to throw and kill the process.
+if (!(await keypad.tryReopen())) {
+  console.error('[keypad] device not found at startup — waiting for it to appear')
+  while (!(await keypad.tryReopen())) {
+    await new Promise((resolve) => setTimeout(resolve, RECONNECT_INTERVAL_MS))
+  }
+}
 console.log('[keypad] device open')
 
 // Reconnect loop: when the MX Console is unplugged, device.ts marks itself
 // disconnected and emits 'disconnect'. We poll for the device to reappear
-// and resume painting as soon as open() succeeds again. The interval is
-// generous (2s) — replug detection doesn't need to be instant.
-const RECONNECT_INTERVAL_MS = 2000
+// and resume painting as soon as open() succeeds again.
 let reconnectTimer: NodeJS.Timeout | null = null
 keypad.on('disconnect', () => {
   console.error('[keypad] device disconnected — waiting for replug')
