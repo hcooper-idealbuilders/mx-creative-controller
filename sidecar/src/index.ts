@@ -1,4 +1,4 @@
-import { readFile, writeFile, rename } from 'node:fs/promises'
+import { readFile, writeFile, rename, unlink } from 'node:fs/promises'
 import { join } from 'node:path'
 import { SessionsWatcher } from './sessions-watcher.js'
 import { IpcServer, type CommandMessage } from './ipc-server.js'
@@ -20,20 +20,41 @@ const PORT = Number(process.env.MX_SIDECAR_PORT ?? 9876)
  */
 async function markApproved(sessionId: string): Promise<void> {
   const path = join(SESSIONS_DIR, `${sessionId}.json`)
-  try {
-    let raw = await readFile(path, 'utf8')
-    if (raw.charCodeAt(0) === 0xfeff) raw = raw.slice(1)
-    const s = JSON.parse(raw) as Record<string, unknown>
-    s.state = 'thinking'
-    s.notification_message = null
-    s.last_event = 'KeypadApprove'
-    s.last_updated = new Date().toISOString()
-    const tmp = `${path}.tmp`
-    await writeFile(tmp, JSON.stringify(s, null, 2))
-    await rename(tmp, path)  // atomic on same volume; watcher ignores *.tmp
-  } catch (err) {
-    console.error('[mx-sidecar] markApproved failed:', (err as Error).message)
+  const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms))
+  let lastErr: Error | null = null
+  // Retry the whole read-modify-swap: the hook's own ReplaceFile can hold
+  // the target at the exact moment we rename (observed as EPERM), and losing
+  // this write re-lights Approve — which invites a double-press that types a
+  // stray "1⏎" into the session. Worth being stubborn about.
+  for (let attempt = 0; attempt < 4; attempt++) {
+    if (attempt > 0) await sleep(30)
+    try {
+      let raw = await readFile(path, 'utf8')
+      if (raw.charCodeAt(0) === 0xfeff) raw = raw.slice(1)
+      const s = JSON.parse(raw) as Record<string, unknown>
+      if (s.state !== 'waiting_input') return  // a real hook event beat us — its truth wins
+      s.state = 'thinking'
+      s.notification_message = null
+      s.last_event = 'KeypadApprove'
+      s.last_updated = new Date().toISOString()
+      const json = JSON.stringify(s, null, 2)
+      const tmp = `${path}.tmp`
+      try {
+        await writeFile(tmp, json)
+        await rename(tmp, path)  // atomic on same volume; watcher ignores *.tmp
+      } catch (swapErr) {
+        // Rename blocked (EPERM lock contention): write in place. Non-atomic,
+        // but the watcher retries partial/failed reads, and a hook overwrite
+        // a moment later is fine — hooks are the source of truth anyway.
+        await unlink(tmp).catch(() => {})
+        await writeFile(path, json)
+      }
+      return
+    } catch (err) {
+      lastErr = err as Error
+    }
   }
+  console.error('[mx-sidecar] markApproved failed after retries:', lastErr?.message)
 }
 
 const watcher = new SessionsWatcher(SESSIONS_DIR)
