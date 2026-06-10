@@ -140,9 +140,12 @@ function Test-WindowStillValid {
     } catch { return $false }
 }
 
-# SessionStart forces a fresh resolve (covers /resume onto a new terminal).
+# SessionStart and UserPromptSubmit force a fresh resolve: SessionStart
+# covers /resume onto a new terminal; UserPromptSubmit is the one moment we
+# *know* the user is typing in this session, so the foreground window is
+# its terminal with near-certainty — the strongest capture signal we have.
 # Every other event reuses the cached hwnd when it's still valid.
-$resolveWindow = ($Event -eq 'SessionStart') -or `
+$resolveWindow = ($Event -eq 'SessionStart') -or ($Event -eq 'UserPromptSubmit') -or `
                  -not (Test-WindowStillValid $status.claude_pid $status.claude_hwnd)
 
 # claude_code_pid is fixed for the session — re-walk only when missing or dead.
@@ -170,36 +173,63 @@ if ($resolveCodePid) {
     } catch { }
 }
 
+$resolveMethod = ''
 if ($resolveWindow) {
-    $status.claude_pid  = $null
-    $status.claude_hwnd = $null
     # Walking the parent chain doesn't work because Windows Terminal hosts
     # shells via ConPTY, breaking the Windows process-tree relationship — WT
-    # isn't in the parent chain of its hosted shells. So we look at every
-    # terminal-class window on the desktop and prefer ones whose title
-    # contains this session's project.
+    # isn't in the parent chain of its hosted shells. Capture order:
+    #   1. foreground window, on SessionStart/UserPromptSubmit only (the user
+    #      just typed here — works regardless of window titles)
+    #   2. title contains this session's project name
+    #   3. title contains 'Claude'
+    #   4. exactly one terminal window on the desktop — it must be the host
     try {
-        $terminals = Get-Process -ErrorAction SilentlyContinue | Where-Object {
+        $terminals = @(Get-Process -ErrorAction SilentlyContinue | Where-Object {
             $_.MainWindowHandle -ne [IntPtr]::Zero -and
             $TERMINAL_NAMES -contains $_.ProcessName
-        }
+        })
         $picked = $null
-        if ($status.project) {
+        if (($Event -eq 'SessionStart') -or ($Event -eq 'UserPromptSubmit')) {
+            try {
+                Add-Type -Namespace MxHook -Name Win32 -MemberDefinition `
+                    '[DllImport("user32.dll")] public static extern System.IntPtr GetForegroundWindow();' -ErrorAction Stop
+                $fg = [MxHook.Win32]::GetForegroundWindow()
+                if ($fg -ne [IntPtr]::Zero) {
+                    $picked = $terminals | Where-Object { [int64]$_.MainWindowHandle -eq [int64]$fg } | Select-Object -First 1
+                    if ($picked) { $resolveMethod = 'FG' }
+                }
+            } catch { }
+        }
+        if (-not $picked -and $status.project) {
             $picked = $terminals | Where-Object { $_.MainWindowTitle -match [regex]::Escape($status.project) } | Select-Object -First 1
+            if ($picked) { $resolveMethod = 'TITLE' }
         }
         if (-not $picked) {
             $picked = $terminals | Where-Object { $_.MainWindowTitle -match 'Claude' } | Select-Object -First 1
+            if ($picked) { $resolveMethod = 'TITLE' }
+        }
+        if (-not $picked -and $terminals.Count -eq 1) {
+            $picked = $terminals[0]
+            $resolveMethod = 'ONLY'
         }
         if ($picked) {
             $status.claude_pid  = [int]$picked.Id
             $status.claude_hwnd = [int64]$picked.MainWindowHandle
+        } elseif (-not (Test-WindowStillValid $status.claude_pid $status.claude_hwnd)) {
+            # Nothing found AND the cache is dead — clear it. A still-valid
+            # cached hwnd survives a missed resolve (e.g. the user submitted
+            # from a minimized window, so foreground capture whiffed).
+            $status.claude_pid  = $null
+            $status.claude_hwnd = $null
         }
     } catch { }
 }
 
 # Diagnostic — CACHED means we skipped the expensive scan this fire.
 try {
-    $mode = if ($resolveWindow) { 'RESOLVE' } else { 'CACHED' }
+    $mode = if (-not $resolveWindow) { 'CACHED' }
+            elseif ($resolveMethod)  { "RESOLVE-$resolveMethod" }
+            else                     { 'RESOLVE-MISS' }
     $tag  = if ($status.claude_hwnd) { "$mode OK hwnd=$($status.claude_hwnd) pid=$($status.claude_pid)" } else { "$mode NOT-FOUND" }
     Add-Content -Path 'C:\Users\hdcooper\IB\projects\hardware-interface\logs\hooks-debug.log' `
                 -Value "$(Get-Date -Format 'o')`tCAPTURE`t$tag" -Encoding UTF8
