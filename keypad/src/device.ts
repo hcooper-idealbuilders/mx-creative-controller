@@ -43,6 +43,15 @@ export type PressEvent = { kind: 'down' | 'up' | 'long-press'; control: ButtonCo
  */
 const LONG_PRESS_MS = 450
 
+/**
+ * Cap on a single HID write. A wedged handle (device reset, Options+
+ * re-enumeration) can leave write() pending forever — which froze the
+ * repaint loop silently: the `painting` guard in index.ts never cleared,
+ * no error was ever thrown, and the LCDs just stayed black. A timeout
+ * converts the hang into an error we treat as a disconnect.
+ */
+const WRITE_TIMEOUT_MS = 2000
+
 export class MxKeypad extends EventEmitter {
   private col1: HIDAsync | null = null
   private col2: HIDAsync | null = null
@@ -143,7 +152,29 @@ export class MxKeypad extends EventEmitter {
       { pixelSize: control.pixelSize, pixelPosition: control.pixelPosition },
       jpeg,
     )
-    for (const p of packets) await this.col3.write([...p])
+    try {
+      for (const p of packets) await this.writeWithTimeout(this.col3, [...p])
+    } catch (err) {
+      // A failed/hung LCD write means the handle is wedged — go through the
+      // disconnect path so the reconnect loop reopens fresh handles.
+      void this.handleDisconnect()
+      throw err
+    }
+  }
+
+  private async writeWithTimeout(handle: HIDAsync, data: number[]): Promise<void> {
+    let timer: NodeJS.Timeout | undefined
+    try {
+      await Promise.race([
+        handle.write(data),
+        new Promise<never>((_, reject) => {
+          timer = setTimeout(() => reject(new Error(`HID write timeout (${WRITE_TIMEOUT_MS}ms)`)), WRITE_TIMEOUT_MS)
+          timer.unref()
+        }),
+      ])
+    } finally {
+      if (timer) clearTimeout(timer)
+    }
   }
 
   // ---- input parsers (mirroring the lib's KeypadInputService) ----
