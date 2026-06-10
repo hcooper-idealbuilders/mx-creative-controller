@@ -26,10 +26,12 @@ const PERMISSION_PROMPT_PATTERNS: ReadonlyArray<string> = [
   // Tool permission prompts — observed in hooks-debug.log as
   //   "Claude needs your permission to use Bash"
   //   "Claude needs your permission to use Edit"
+  //   "Claude needs your permission"            (June 2026 — no tool suffix)
   // These are always about the current task: Claude wants to run an
   // in-flight tool call. Approving them advances the task; rejecting
   // them aborts the tool. They never represent a direction change.
-  'Claude needs your permission to use',
+  // (The bare phrasing subsumes the "… to use X" variant as a substring.)
+  'Claude needs your permission',
 ]
 
 /**

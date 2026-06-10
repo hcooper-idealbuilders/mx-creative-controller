@@ -20,4 +20,12 @@ describe('isPermissionPrompt', () => {
     expect(isPermissionPrompt('Claude needs your permission to use Edit')).toBe(true)
     expect(isPermissionPrompt('Claude needs your permission to use Write')).toBe(true)
   })
+
+  it('bare permission phrasing (no tool suffix, observed June 2026) → true', () => {
+    expect(isPermissionPrompt('Claude needs your permission')).toBe(true)
+  })
+
+  it('waiting-for-input notification → false (free-text, not a yes/no)', () => {
+    expect(isPermissionPrompt('Claude is waiting for your input')).toBe(false)
+  })
 })
