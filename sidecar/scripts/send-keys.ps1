@@ -40,10 +40,44 @@ public class MxWin32 {
     [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
     [DllImport("user32.dll")] public static extern bool BringWindowToTop(IntPtr hWnd);
     [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr hWnd, IntPtr lpdwProcessId);
+    // Separate signature with an out parameter so we can recover the PID
+    // behind a foreground hwnd — used to log which app blocked a focus steal.
+    [DllImport("user32.dll", EntryPoint="GetWindowThreadProcessId")] public static extern uint GetWindowThreadProcessIdOut(IntPtr hWnd, out uint lpdwProcessId);
     [DllImport("user32.dll")] public static extern bool AttachThreadInput(uint idAttach, uint idAttachTo, bool fAttach);
     [DllImport("user32.dll")] public static extern bool IsIconic(IntPtr hWnd);
 }
 "@
+
+# Resolve the process name that owns a window handle. Used purely for
+# diagnostic logging — never for control flow — so we swallow all errors
+# and return '' on any failure path.
+function Get-HwndProcessName {
+    param([IntPtr]$Hwnd)
+    if ($Hwnd -eq [IntPtr]::Zero) { return '' }
+    try {
+        $procId = [uint32]0
+        [void][MxWin32]::GetWindowThreadProcessIdOut($Hwnd, [ref]$procId)
+        if ($procId -eq 0) { return '' }
+        $p = Get-Process -Id $procId -ErrorAction SilentlyContinue
+        if ($p) { return $p.ProcessName }
+    } catch { }
+    return ''
+}
+
+# Per-press structured log so we can see how often Windows blocks the focus
+# steal and which app was holding foreground at the time. Tab-separated for
+# easy awk/Select-String. Best-effort — never throws.
+function Write-PressLog {
+    param([string]$Outcome, [IntPtr]$TargetHwnd, [IntPtr]$ForegroundHwnd, [string]$Detail = '')
+    try {
+        $logDir = 'C:\Users\hdcooper\IB\projects\hardware-interface\logs'
+        if (-not (Test-Path $logDir)) { New-Item -ItemType Directory -Path $logDir -Force | Out-Null }
+        $targetProc = Get-HwndProcessName -Hwnd $TargetHwnd
+        $fgProc     = Get-HwndProcessName -Hwnd $ForegroundHwnd
+        $line = "$(Get-Date -Format 'o')`t$Command`t$Outcome`ttarget=$TargetHwnd($targetProc)`tfg=$ForegroundHwnd($fgProc)`t$Detail"
+        Add-Content -Path (Join-Path $logDir 'send-keys.log') -Value $line -Encoding UTF8
+    } catch { }
+}
 
 $TERMINAL_NAMES = @('powershell','pwsh','WindowsTerminal','WindowsTerminalPreview','conhost','cmd','OpenConsole')
 
@@ -100,6 +134,24 @@ function Force-Foreground {
     }
 }
 
+# Focus + verify. SetForegroundWindow can silently fail when Windows denies
+# focus-steal (very common when another app like Excel currently holds
+# foreground). Without verifying, SendKeys::SendWait would then type "1{ENTER}"
+# into whatever is foreground — Hunter's Excel cell, his browser address bar,
+# etc. We poll GetForegroundWindow until it matches the target or we time out,
+# then return whether focus actually landed where we expected.
+function Set-ForegroundAndVerify {
+    param([IntPtr]$Hwnd, [int]$TimeoutMs = 300)
+    if ($Hwnd -eq [IntPtr]::Zero) { return $false }
+    Force-Foreground -Hwnd $Hwnd
+    $deadline = (Get-Date).AddMilliseconds($TimeoutMs)
+    while ((Get-Date) -lt $deadline) {
+        if ([MxWin32]::GetForegroundWindow() -eq $Hwnd) { return $true }
+        Start-Sleep -Milliseconds 15
+    }
+    return $false
+}
+
 # Resolve the target window: direct HWND first, then PID, then fallback search.
 $hwnd = [IntPtr]::Zero
 if ($ClaudeHwnd -gt 0) { $hwnd = [IntPtr]$ClaudeHwnd }
@@ -107,6 +159,7 @@ if ($hwnd -eq [IntPtr]::Zero) { $hwnd = Get-HwndByPid -ProcessId $ClaudePid }
 if ($hwnd -eq [IntPtr]::Zero) { $hwnd = Find-LikelyClaudeTerminal -ProjectHint $ProjectHint }
 
 if ($hwnd -eq [IntPtr]::Zero) {
+    Write-PressLog -Outcome 'NO-TARGET' -TargetHwnd ([IntPtr]::Zero) -ForegroundHwnd ([MxWin32]::GetForegroundWindow()) -Detail "ClaudePid=$ClaudePid"
     Write-Error "send-keys: no Claude terminal found (ClaudePid=$ClaudePid). Refusing to send '$Command'."
     exit 2
 }
@@ -115,15 +168,24 @@ if ($hwnd -eq [IntPtr]::Zero) {
 # back afterward. SendKeys::SendWait requires the target window to be in
 # the foreground — there's no in-place "type into HWND" path that works
 # reliably through Windows Terminal's ConPTY. The right user experience
-# is therefore: focus → type → restore. The 'focus' command intentionally
-# skips the restore (its whole point is to leave Claude in front).
+# is therefore: focus → verify → type → restore. The 'focus' command
+# intentionally skips the verify-and-restore (its whole point is to leave
+# Claude in front; a focus-steal denial there is harmless).
 $prevForeground = if ($keys) { [MxWin32]::GetForegroundWindow() } else { [IntPtr]::Zero }
 
-Force-Foreground -Hwnd $hwnd
-Start-Sleep -Milliseconds 80
-
 if ($keys) {
+    if (-not (Set-ForegroundAndVerify -Hwnd $hwnd)) {
+        # Windows denied the focus steal — the target never came forward.
+        # Sending now would type the keys into whatever IS foreground
+        # (Excel, browser, etc). Abort instead, and let the sidecar surface
+        # this as a press-failed error on the keypad (red border).
+        $fg = [MxWin32]::GetForegroundWindow()
+        Write-PressLog -Outcome 'DENIED' -TargetHwnd $hwnd -ForegroundHwnd $fg
+        Write-Error "send-keys: target window did not come to foreground (hwnd=$hwnd, foreground=$fg). Refusing to send '$Command'."
+        exit 3
+    }
     [System.Windows.Forms.SendKeys]::SendWait($keys)
+    Write-PressLog -Outcome 'OK' -TargetHwnd $hwnd -ForegroundHwnd $prevForeground -Detail "keys=$keys"
     # Restore prior foreground unless it was Claude itself (then there's
     # nothing to restore). Brief settle so SendKeys finishes its synthetic
     # input queue before we pull focus away.
@@ -131,4 +193,10 @@ if ($keys) {
         Start-Sleep -Milliseconds 40
         Force-Foreground -Hwnd $prevForeground
     }
+} else {
+    # 'focus' command: best-effort, no verification — bring Claude forward
+    # and leave it there even if Windows briefly denies the steal.
+    $fgBefore = [MxWin32]::GetForegroundWindow()
+    Force-Foreground -Hwnd $hwnd
+    Write-PressLog -Outcome 'FOCUS' -TargetHwnd $hwnd -ForegroundHwnd $fgBefore
 }
