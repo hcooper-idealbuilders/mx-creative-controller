@@ -12,6 +12,7 @@ beforeEach(async () => {
 })
 
 afterEach(async () => {
+  watcher?.stop()
   if (dir) await rm(dir, { recursive: true, force: true })
 })
 

@@ -39,8 +39,15 @@ function isPidAlive(pid: number): boolean {
  */
 const LIVENESS_POLL_MS = 30_000
 
+const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms))
+
 export class SessionsWatcher extends EventEmitter {
   sessions: SessionStatus[] = []
+  private reloading = false
+  private reloadQueued = false
+  private stopped = false
+  private pollTimer: NodeJS.Timeout | null = null
+  private fsWatcher: ReturnType<typeof fsWatch> | null = null
 
   constructor(private dir: string) { super() }
 
@@ -50,11 +57,46 @@ export class SessionsWatcher extends EventEmitter {
     }
     await this.reload()
     this.attach()
-    setInterval(() => { void this.reload() }, LIVENESS_POLL_MS)
+    // unref: the poll must not be what keeps the process alive — the WS
+    // server owns that.
+    this.pollTimer = setInterval(() => { void this.reload() }, LIVENESS_POLL_MS)
+    this.pollTimer.unref()
+  }
+
+  /**
+   * Tear down the fs watcher and liveness poll. Without this, tests that
+   * rm -rf the watched directory in afterEach trigger straggler reloads
+   * whose console output races vitest's worker teardown and hangs it.
+   */
+  stop(): void {
+    this.stopped = true
+    if (this.pollTimer) { clearInterval(this.pollTimer); this.pollTimer = null }
+    if (this.fsWatcher) { this.fsWatcher.close(); this.fsWatcher = null }
+  }
+
+  /**
+   * Serialized + coalesced entry point. fsWatch can fire several times per
+   * hook write; running reloads concurrently let a slow stale read finish
+   * *after* a fresh one and clobber it (last emit wins). Instead: one reload
+   * at a time, and any trigger that arrives mid-run queues exactly one
+   * follow-up pass.
+   */
+  private async reload(): Promise<void> {
+    if (this.stopped) return
+    if (this.reloading) { this.reloadQueued = true; return }
+    this.reloading = true
+    try {
+      do {
+        this.reloadQueued = false
+        await this.doReload()
+      } while (this.reloadQueued && !this.stopped)
+    } finally {
+      this.reloading = false
+    }
   }
 
   /** Sessions in FIFO order by first_seen. Column N == sessions[N]. */
-  private async reload(): Promise<void> {
+  private async doReload(): Promise<void> {
     const out: SessionStatus[] = []
     const now = Date.now()
     try {
@@ -62,13 +104,24 @@ export class SessionsWatcher extends EventEmitter {
       for (const f of files) {
         if (!f.endsWith('.json') || f.endsWith('.tmp')) continue
         const path = join(this.dir, f)
+        // Brief retry on read/parse failure: a failure here is usually the
+        // hook mid-swap (or mid-write on non-atomic fallback), and dropping
+        // the session from this broadcast makes the keypad column flicker
+        // or miss a state transition entirely.
         let parsed: SessionStatus | null = null
-        try {
-          let raw = await readFile(path, 'utf8')
-          if (raw.charCodeAt(0) === 0xfeff) raw = raw.slice(1)
-          parsed = JSON.parse(raw) as SessionStatus
-        } catch (err) {
-          console.error(`[sessions-watcher] parse failed for ${f}:`, (err as Error).message)
+        let lastErr: Error | null = null
+        for (let attempt = 0; attempt < 3 && !parsed; attempt++) {
+          if (attempt > 0) await sleep(25)
+          try {
+            let raw = await readFile(path, 'utf8')
+            if (raw.charCodeAt(0) === 0xfeff) raw = raw.slice(1)
+            parsed = JSON.parse(raw) as SessionStatus
+          } catch (err) {
+            lastErr = err as Error
+          }
+        }
+        if (!parsed) {
+          console.error(`[sessions-watcher] parse failed for ${f}:`, lastErr?.message)
           continue
         }
         // Drop sessions whose Claude Code process is no longer running.
@@ -99,12 +152,15 @@ export class SessionsWatcher extends EventEmitter {
 
   private attach(): void {
     const tryWatch = (): void => {
+      if (this.stopped) return
       if (!existsSync(this.dir)) {
-        setTimeout(tryWatch, 1000)
+        setTimeout(tryWatch, 1000).unref()
         return
       }
       const w = fsWatch(this.dir, () => { void this.reload() })
-      w.on('error', () => { w.close(); setTimeout(tryWatch, 1000) })
+      w.unref()  // same as the liveness poll — don't hold the event loop open
+      w.on('error', () => { w.close(); setTimeout(tryWatch, 1000).unref() })
+      this.fsWatcher = w
     }
     tryWatch()
   }

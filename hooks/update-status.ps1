@@ -128,15 +128,20 @@ $TERMINAL_NAMES = @('powershell','pwsh','WindowsTerminal','conhost','cmd','windo
 $cachedCodePid = Get-FieldOrDefault $loaded 'claude_code_pid' $null
 $status | Add-Member -NotePropertyName 'claude_code_pid' -NotePropertyValue $cachedCodePid -Force
 
-# Cheap liveness check: does the cached PID still own the cached hwnd?
-# MainWindowHandle is stable for a process's lifetime, so handle equality is
-# an exact validity test, not a heuristic.
+# Cheap liveness check: is the cached PID still a running terminal process?
+# We deliberately do NOT compare against MainWindowHandle — Windows Terminal
+# is one process owning many top-level windows (observed hwnds 200148 and
+# 202290 under the same PID), and MainWindowHandle reports only whichever
+# window is currently "main". Handle equality falsely invalidated good
+# cached hwnds for sessions in background WT windows. A genuinely dead hwnd
+# self-corrects: send-keys verifies focus landed before typing and fails
+# clean, and the next UserPromptSubmit re-captures via foreground.
 function Test-WindowStillValid {
     param($ProcessId, $Hwnd)
     if (-not $ProcessId -or -not $Hwnd) { return $false }
     try {
         $p = Get-Process -Id $ProcessId -ErrorAction Stop
-        return ($p.MainWindowHandle -ne [IntPtr]::Zero) -and ([int64]$p.MainWindowHandle -eq [int64]$Hwnd)
+        return $TERMINAL_NAMES -contains $p.ProcessName
     } catch { return $false }
 }
 
@@ -239,4 +244,17 @@ $tmpPath = "$statusPath.tmp"
 $json = $status | ConvertTo-Json -Depth 10
 $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
 [System.IO.File]::WriteAllText($tmpPath, $json, $utf8NoBom)
-Move-Item -Path $tmpPath -Destination $statusPath -Force
+# Atomic swap. Move-Item -Force is delete-then-rename, which left an ENOENT
+# window where the sidecar's fs.watch-triggered read found no file at all and
+# dropped this session from the broadcast. File.Replace maps to ReplaceFile(),
+# atomic on NTFS — readers see either the old or the new content, never nothing.
+try {
+    if (Test-Path $statusPath) {
+        [System.IO.File]::Replace($tmpPath, $statusPath, $null)
+    } else {
+        [System.IO.File]::Move($tmpPath, $statusPath)
+    }
+} catch {
+    # e.g. the target vanished between Test-Path and Replace (SessionEnd race).
+    Move-Item -Path $tmpPath -Destination $statusPath -Force
+}
