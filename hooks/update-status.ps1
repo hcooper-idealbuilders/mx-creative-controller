@@ -18,7 +18,7 @@ if ($Event -eq 'SessionEnd') {
         }
     }
     try {
-        Add-Content -Path 'C:\Users\hdcooper\Hardware-interface\logs\hooks-debug.log' `
+        Add-Content -Path 'C:\Users\hdcooper\IB\projects\hardware-interface\logs\hooks-debug.log' `
                     -Value "$(Get-Date -Format 'o')`tSessionEnd-DELETED`t$($payload.session_id)" -Encoding UTF8
     } catch { }
     return
@@ -29,7 +29,7 @@ $ErrorActionPreference = 'Stop'
 # Debug log so we can verify every hook invocation, not just the "last_event"
 # that survives in the session file. Tail logs/hooks-debug.log to see firings.
 try {
-    $debugDir = 'C:\Users\hdcooper\Hardware-interface\logs'
+    $debugDir = 'C:\Users\hdcooper\IB\projects\hardware-interface\logs'
     if (-not (Test-Path $debugDir)) { New-Item -ItemType Directory -Path $debugDir -Force | Out-Null }
     $debugLine = "$(Get-Date -Format 'o')`t$Event`t$([System.IO.Path]::GetFileName($MyInvocation.MyCommand.Path))"
     Add-Content -Path (Join-Path $debugDir 'hooks-debug.log') -Value $debugLine -Encoding UTF8
@@ -99,7 +99,7 @@ if ($Event -eq 'Notification') {
     $msg = if ($payload -and $payload.message) { [string]$payload.message } else { '' }
     $status | Add-Member -NotePropertyName 'notification_message' -NotePropertyValue $msg -Force
     try {
-        Add-Content -Path 'C:\Users\hdcooper\Hardware-interface\logs\hooks-debug.log' `
+        Add-Content -Path 'C:\Users\hdcooper\IB\projects\hardware-interface\logs\hooks-debug.log' `
                     -Value "$(Get-Date -Format 'o')`tNOTIFICATION-MSG`t$msg" -Encoding UTF8
     } catch { }
 } else {
@@ -113,47 +113,95 @@ if ($payload.model) {
     $status.model = if ($payload.model.id) { $payload.model.id } else { [string]$payload.model }
 }
 
-# Walk up the process tree until we find a *terminal* ancestor (one of
-# powershell / pwsh / WindowsTerminal / conhost / cmd) that owns a window —
-# that's the host running Claude Code. Done on every event so a missed
-# SessionStart still gets corrected on the next hook fire.
-#
+# Terminal-class processes whose window we'd accept as "the Claude Code host".
 # We exclude generic window-owners like explorer.exe because every desktop
 # process eventually descends from explorer; accepting the first window
 # ancestor would mis-capture it as the "Claude" PID.
 $TERMINAL_NAMES = @('powershell','pwsh','WindowsTerminal','conhost','cmd','windowsterminalpreview')
-# Reset captured target before searching — stale values from an earlier
-# (broken) walker shouldn't survive. We re-resolve on every hook event.
-$status.claude_pid  = $null
-$status.claude_hwnd = $null
 
-# Find the terminal window via global search. Walking the parent chain
-# doesn't work because Windows Terminal hosts shells via ConPTY, breaking
-# the Windows process-tree relationship — WT isn't in the parent chain
-# of its hosted shells. So we look at every terminal-class window on
-# the desktop and prefer ones whose title contains this session's project.
-try {
-    $terminals = Get-Process -ErrorAction SilentlyContinue | Where-Object {
-        $_.MainWindowHandle -ne [IntPtr]::Zero -and
-        $TERMINAL_NAMES -contains $_.ProcessName
-    }
-    $picked = $null
-    if ($status.project) {
-        $picked = $terminals | Where-Object { $_.MainWindowTitle -match [regex]::Escape($status.project) } | Select-Object -First 1
-    }
-    if (-not $picked) {
-        $picked = $terminals | Where-Object { $_.MainWindowTitle -match 'Claude' } | Select-Object -First 1
-    }
-    if ($picked) {
-        $status.claude_pid  = [int]$picked.Id
-        $status.claude_hwnd = [int64]$picked.MainWindowHandle
-    }
-} catch { }
+# Seed cached resolutions from the previous hook fire. The earlier version
+# wiped these unconditionally and re-ran a ~1s WMI + Get-Process scan on every
+# hook event — including high-frequency PreToolUse/PostToolUse — which both
+# burned latency and wiped good hwnds whenever the title-match heuristic
+# happened to miss later in the session. Now we keep the cached values and
+# only re-resolve when they're missing or no longer valid.
+$cachedCodePid = Get-FieldOrDefault $loaded 'claude_code_pid' $null
+$status | Add-Member -NotePropertyName 'claude_code_pid' -NotePropertyValue $cachedCodePid -Force
 
-# Diagnostic
+# Cheap liveness check: does the cached PID still own the cached hwnd?
+# MainWindowHandle is stable for a process's lifetime, so handle equality is
+# an exact validity test, not a heuristic.
+function Test-WindowStillValid {
+    param($ProcessId, $Hwnd)
+    if (-not $ProcessId -or -not $Hwnd) { return $false }
+    try {
+        $p = Get-Process -Id $ProcessId -ErrorAction Stop
+        return ($p.MainWindowHandle -ne [IntPtr]::Zero) -and ([int64]$p.MainWindowHandle -eq [int64]$Hwnd)
+    } catch { return $false }
+}
+
+# SessionStart forces a fresh resolve (covers /resume onto a new terminal).
+# Every other event reuses the cached hwnd when it's still valid.
+$resolveWindow = ($Event -eq 'SessionStart') -or `
+                 -not (Test-WindowStillValid $status.claude_pid $status.claude_hwnd)
+
+# claude_code_pid is fixed for the session — re-walk only when missing or dead.
+$resolveCodePid = -not $status.claude_code_pid
+if ($status.claude_code_pid) {
+    try { $null = Get-Process -Id $status.claude_code_pid -ErrorAction Stop }
+    catch { $resolveCodePid = $true }
+}
+
+if ($resolveCodePid) {
+    $status.claude_code_pid = $null
+    try {
+        $walkPid = $PID
+        for ($i = 0; $i -lt 5; $i++) {
+            $wmiProc = Get-CimInstance Win32_Process -Filter "ProcessId=$walkPid" -ErrorAction Stop
+            if (-not $wmiProc -or -not $wmiProc.ParentProcessId) { break }
+            $parentPid = [int]$wmiProc.ParentProcessId
+            $parentProc = Get-Process -Id $parentPid -ErrorAction SilentlyContinue
+            if ($parentProc -and ($parentProc.ProcessName -eq 'node' -or $parentProc.ProcessName -eq 'claude')) {
+                $status.claude_code_pid = $parentPid
+                break
+            }
+            $walkPid = $parentPid
+        }
+    } catch { }
+}
+
+if ($resolveWindow) {
+    $status.claude_pid  = $null
+    $status.claude_hwnd = $null
+    # Walking the parent chain doesn't work because Windows Terminal hosts
+    # shells via ConPTY, breaking the Windows process-tree relationship — WT
+    # isn't in the parent chain of its hosted shells. So we look at every
+    # terminal-class window on the desktop and prefer ones whose title
+    # contains this session's project.
+    try {
+        $terminals = Get-Process -ErrorAction SilentlyContinue | Where-Object {
+            $_.MainWindowHandle -ne [IntPtr]::Zero -and
+            $TERMINAL_NAMES -contains $_.ProcessName
+        }
+        $picked = $null
+        if ($status.project) {
+            $picked = $terminals | Where-Object { $_.MainWindowTitle -match [regex]::Escape($status.project) } | Select-Object -First 1
+        }
+        if (-not $picked) {
+            $picked = $terminals | Where-Object { $_.MainWindowTitle -match 'Claude' } | Select-Object -First 1
+        }
+        if ($picked) {
+            $status.claude_pid  = [int]$picked.Id
+            $status.claude_hwnd = [int64]$picked.MainWindowHandle
+        }
+    } catch { }
+}
+
+# Diagnostic — CACHED means we skipped the expensive scan this fire.
 try {
-    $tag = if ($status.claude_hwnd) { "OK hwnd=$($status.claude_hwnd) pid=$($status.claude_pid)" } else { 'NOT-FOUND' }
-    Add-Content -Path 'C:\Users\hdcooper\Hardware-interface\logs\hooks-debug.log' `
+    $mode = if ($resolveWindow) { 'RESOLVE' } else { 'CACHED' }
+    $tag  = if ($status.claude_hwnd) { "$mode OK hwnd=$($status.claude_hwnd) pid=$($status.claude_pid)" } else { "$mode NOT-FOUND" }
+    Add-Content -Path 'C:\Users\hdcooper\IB\projects\hardware-interface\logs\hooks-debug.log' `
                 -Value "$(Get-Date -Format 'o')`tCAPTURE`t$tag" -Encoding UTF8
 } catch { }
 

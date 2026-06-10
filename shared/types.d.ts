@@ -33,8 +33,11 @@ export interface SessionStatus {
   model: string | null
   fast_mode: boolean
   session_id: string
+  /** Claude Code's own node.exe PID, captured by walking the hook's parent chain. */
+  claude_code_pid: number | null
+  /** Terminal window PID (e.g. WindowsTerminal.exe) — may outlive the session in multi-tab hosts. */
   claude_pid: number | null
-  /** Captured at hook time; preferred over claude_pid when targeting a window. */
+  /** Terminal window handle; preferred over claude_pid when targeting a window for keystrokes. */
   claude_hwnd: number | null
   first_seen: string | null
   last_event: string | null

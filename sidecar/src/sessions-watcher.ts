@@ -22,6 +22,23 @@ export function isStale(lastUpdated: string | null, now: number, thresholdMs = S
   return now - t > thresholdMs
 }
 
+/** True if the given PID still corresponds to a running process. */
+function isPidAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0)  // signal 0 = existence check, doesn't kill
+    return true
+  } catch {
+    return false
+  }
+}
+
+/**
+ * How often the watcher force-reloads even without an fsWatch trigger.
+ * Catches dead PIDs that no hook event will ever clean up (user killed
+ * the terminal window → SessionEnd never fires, directory unchanged).
+ */
+const LIVENESS_POLL_MS = 30_000
+
 export class SessionsWatcher extends EventEmitter {
   sessions: SessionStatus[] = []
 
@@ -33,6 +50,7 @@ export class SessionsWatcher extends EventEmitter {
     }
     await this.reload()
     this.attach()
+    setInterval(() => { void this.reload() }, LIVENESS_POLL_MS)
   }
 
   /** Sessions in FIFO order by first_seen. Column N == sessions[N]. */
@@ -53,7 +71,17 @@ export class SessionsWatcher extends EventEmitter {
           console.error(`[sessions-watcher] parse failed for ${f}:`, (err as Error).message)
           continue
         }
-        // Drop abandoned sessions (Claude Code crashed, no SessionEnd fired).
+        // Drop sessions whose Claude Code process is no longer running.
+        // Prefer claude_code_pid (the node.exe that IS Claude Code) over
+        // claude_pid (the terminal host, e.g. WindowsTerminal.exe) because
+        // multi-tab terminals outlive individual sessions.
+        const livenessPid = parsed.claude_code_pid ?? parsed.claude_pid
+        if (livenessPid && !isPidAlive(livenessPid)) {
+          await unlink(path).catch(() => {})
+          console.log(`[sessions-watcher] pruned ${f} (PID ${livenessPid} dead)`)
+          continue
+        }
+        // Fallback: if neither PID is available, use the 2-hour timestamp check.
         if (isStale(parsed.last_updated, now)) {
           await unlink(path).catch(() => {})
           console.log(`[sessions-watcher] pruned stale ${f} (last_updated ${parsed.last_updated})`)
