@@ -6,7 +6,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "powershell -NoProfile -ExecutionPolicy Bypass -File C:/Users/hdcooper/Hardware-interface/hooks/update-status.ps1 -Event SessionStart"
+            "command": "powershell -NoProfile -ExecutionPolicy Bypass -File C:/Users/hdcooper/IB/projects/hardware-interface/hooks/update-status.ps1 -Event SessionStart"
           }
         ]
       }
@@ -16,7 +16,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "powershell -NoProfile -ExecutionPolicy Bypass -File C:/Users/hdcooper/Hardware-interface/hooks/update-status.ps1 -Event UserPromptSubmit"
+            "command": "powershell -NoProfile -ExecutionPolicy Bypass -File C:/Users/hdcooper/IB/projects/hardware-interface/hooks/update-status.ps1 -Event UserPromptSubmit"
           }
         ]
       }
@@ -26,7 +26,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "powershell -NoProfile -ExecutionPolicy Bypass -File C:/Users/hdcooper/Hardware-interface/hooks/update-status.ps1 -Event Stop"
+            "command": "powershell -NoProfile -ExecutionPolicy Bypass -File C:/Users/hdcooper/IB/projects/hardware-interface/hooks/update-status.ps1 -Event Stop"
           }
         ]
       }
@@ -36,7 +36,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "powershell -NoProfile -ExecutionPolicy Bypass -File C:/Users/hdcooper/Hardware-interface/hooks/update-status.ps1 -Event Notification"
+            "command": "powershell -NoProfile -ExecutionPolicy Bypass -File C:/Users/hdcooper/IB/projects/hardware-interface/hooks/update-status.ps1 -Event Notification"
           }
         ]
       }
@@ -46,7 +46,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "powershell -NoProfile -ExecutionPolicy Bypass -File C:/Users/hdcooper/Hardware-interface/hooks/update-status.ps1 -Event SessionEnd"
+            "command": "powershell -NoProfile -ExecutionPolicy Bypass -File C:/Users/hdcooper/IB/projects/hardware-interface/hooks/update-status.ps1 -Event SessionEnd"
           }
         ]
       }
@@ -57,7 +57,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "powershell -NoProfile -ExecutionPolicy Bypass -File C:/Users/hdcooper/Hardware-interface/hooks/update-status.ps1 -Event PreToolUse"
+            "command": "powershell -NoProfile -ExecutionPolicy Bypass -File C:/Users/hdcooper/IB/projects/hardware-interface/hooks/update-status.ps1 -Event PreToolUse"
           }
         ]
       }
@@ -68,7 +68,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "powershell -NoProfile -ExecutionPolicy Bypass -File C:/Users/hdcooper/Hardware-interface/hooks/update-status.ps1 -Event PostToolUse"
+            "command": "powershell -NoProfile -ExecutionPolicy Bypass -File C:/Users/hdcooper/IB/projects/hardware-interface/hooks/update-status.ps1 -Event PostToolUse"
           }
         ]
       }
