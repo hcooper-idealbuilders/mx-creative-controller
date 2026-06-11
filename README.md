@@ -25,15 +25,16 @@ Each column is one Claude session, assigned FIFO. Empty columns render rainbow C
 
 SessionEnd deletes the session file outright — ended sessions don't display.
 
-- **row 0 (status)** — press cycles per-session effort level (low → medium → high → xhigh) via `/effort`.
-- **row 1 (Approve)** — enabled only on `waiting_input` *and* when the notification text matches a known permission-prompt pattern (e.g. `"Claude needs your permission to use …"`). Direction-change questions leave the button greyed so an accidental press can't steer the work off course. Approve sends `1⏎` (Claude Code's numbered "Yes" option).
+- **row 0 (status)** — tap cycles per-session effort level (low → medium → high → xhigh) via `/effort`; long-press toggles fast mode via `/fast`.
+- **row 1 (Approve)** — enabled only on `waiting_input` *and* when the notification text matches a known permission-prompt pattern (e.g. `"Claude needs your permission"`). Direction-change questions leave the button greyed so an accidental press can't steer the work off course. Approve sends `1⏎` (Claude Code's numbered "Yes" option).
 - **row 2 (Focus)** — focuses the terminal hosting that session.
 
 ## Architecture
 
 ```
 Claude Code (PowerShell)
-  └─ hooks  SessionStart / UserPromptSubmit / Stop / Notification / SessionEnd
+  └─ hooks  SessionStart / UserPromptSubmit / PreToolUse / PostToolUse
+            / Notification / Stop / SessionEnd
        └─ per-session JSON in  ~/.claude/mx-sessions/<session_id>.json
                        │
                        ▼  (fs.watch on the directory)
@@ -83,7 +84,7 @@ To uninstall: `.\uninstall.ps1` (stops + unregisters the tasks; leaves source/bu
 After install:
 1. Start any Claude Code session in PowerShell. Watch column 0 light up with your project name.
 2. Submit a prompt — column 0's mark turns into two pulsing dots.
-3. When Claude finishes — green mark + the `Continue` and `Focus` buttons light up.
+3. When Claude asks for permission — the mark turns orange and `Approve` lights green. One press answers it.
 4. Open a second Claude Code in another terminal — it appears in column 1.
 
 ## Repo map
@@ -98,6 +99,10 @@ After install:
 - `docs/` — `protocol.md`, `architecture.md`, and the dated session `journal/`.
 - `plugin/` — the dead-end Logi Actions SDK attempt. Kept as narrative context.
 
-## The discovery worth sharing
+## The discoveries worth sharing
 
-If you hit `Cannot write to hid device` with `@logitech-mx-creative-console/node`, the lib opens the wrong HID collection by default. The MX Creative Console exposes report IDs `0x11` / `0x13` / `0x14` on **three separate HID collections** (`Col01` / `Col02` / `Col03`, vendor page `0xff43`, usages `0x1a02` / `0x1a08` / `0x1a10`). The lib only opens one handle, so it always fails on at least one report type. See [`docs/protocol.md`](docs/protocol.md) and the journal for the full story.
+**Three HID collections, not one.** If you hit `Cannot write to hid device` with `@logitech-mx-creative-console/node`, the lib opens the wrong HID collection by default. The MX Creative Console exposes report IDs `0x11` / `0x13` / `0x14` on **three separate HID collections** (`Col01` / `Col02` / `Col03`, vendor page `0xff43`, usages `0x1a02` / `0x1a08` / `0x1a10`). The lib only opens one handle, so it always fails on at least one report type. See [`docs/protocol.md`](docs/protocol.md) and the journal for the full story.
+
+**The firmware dims the panels on its own.** After an idle period (and after USB suspend), the console sets its LCD brightness to zero all by itself. Image writes keep succeeding — into a black screen. If your keypad "works perfectly" with nothing visible, send the HID++ brightness command (`0x11 ff 0f 2b 00 <pct>` on Col01) periodically. This controller re-asserts it every 30 seconds.
+
+**Windows Terminal eats console windows.** With WT as the default terminal app, any console process you spawn becomes a WT *tab* and never owns a window handle — `MainWindowHandle` stays 0 forever. Spawn via `conhost.exe <your.exe>` when you need a targetable window (our e2e harness does). Relatedly: one WT process owns *many* top-level windows, so never treat `MainWindowHandle` equality as a window-validity test.

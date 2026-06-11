@@ -22,4 +22,13 @@ Most scripts use the installed `@logitech-mx-creative-console/node` and `node-hi
 
 ## Capture scripts
 
-`scripts/*.bat` are USBPcap orchestration wrappers — they must be launched elevated. See `captures/README.md`.
+`scripts/*.bat` are USBPcap orchestration wrappers — they must be launched elevated. See `captures/README.md`. (They predate the repo's move and still reference the old working-directory paths; kept as-is for the historical record.)
+
+## Live diagnostics (current)
+
+Unlike the historical scripts above, these two are part of the working toolchain:
+
+| Script | What it does |
+|---|---|
+| `scripts/ws-monitor.mjs` | Connects to the sidecar WebSocket and appends every broadcast to `logs/ws-monitor.log` — shows exactly what the keypad receives, and when, without staring at LCDs. |
+| `scripts/e2e-test.ps1` | Full-pipeline test against a sandboxed conhost window: fake session file → watcher → broadcast → approve/effort/fast/focus commands → real SendKeys delivery, verified. 12 checks. Run after any sidecar or send-keys change. |
