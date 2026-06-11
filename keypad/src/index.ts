@@ -39,13 +39,24 @@ console.log('[keypad] device open')
 // disconnected and emits 'disconnect'. We poll for the device to reappear
 // and resume painting as soon as open() succeeds again.
 let reconnectTimer: NodeJS.Timeout | null = null
+let reconnectAttempts = 0
 keypad.on('disconnect', () => {
   console.error('[keypad] device disconnected — waiting for replug')
   if (reconnectTimer) return
+  reconnectAttempts = 0
   reconnectTimer = setInterval(async () => {
     const ok = await keypad.tryReopen()
-    if (!ok) return
-    console.log('[keypad] device reconnected')
+    if (!ok) {
+      // Surface WHY reopening fails — a silent retry loop hid an
+      // all-night outage where the device was enumerable the whole time.
+      // First failure + once a minute keeps the log readable.
+      reconnectAttempts++
+      if (reconnectAttempts === 1 || reconnectAttempts % 30 === 0) {
+        console.error(`[keypad] reopen failed (attempt ${reconnectAttempts}): ${keypad.lastOpenError ?? 'unknown'}`)
+      }
+      return
+    }
+    console.log(`[keypad] device reconnected (after ${reconnectAttempts} failed attempts)`)
     clearInterval(reconnectTimer!)
     reconnectTimer = null
     void repaint()

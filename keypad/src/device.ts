@@ -80,9 +80,24 @@ export class MxKeypad extends EventEmitter {
     // col1 is opened (some Logitech firmware expects all three collections
     // claimed before LCD writes go through) but we don't listen — short
     // HID++ reports are only used by the unbound row-3 page buttons.
-    this.col1 = await HID.HIDAsync.open(find(0x1a02))
-    this.col2 = await HID.HIDAsync.open(find(0x1a08))
-    this.col3 = await HID.HIDAsync.open(find(0x1a10))
+    //
+    // Exception-safe: a partial open (e.g. col3 fails while the device is
+    // still settling after a USB resume) must release what it grabbed, or
+    // the leaked handles can block every subsequent reopen attempt forever.
+    let c1: HIDAsync | null = null
+    let c2: HIDAsync | null = null
+    let c3: HIDAsync | null = null
+    try {
+      c1 = await HID.HIDAsync.open(find(0x1a02))
+      c2 = await HID.HIDAsync.open(find(0x1a08))
+      c3 = await HID.HIDAsync.open(find(0x1a10))
+    } catch (err) {
+      await Promise.allSettled([c1?.close(), c2?.close(), c3?.close()])
+      throw err
+    }
+    this.col1 = c1
+    this.col2 = c2
+    this.col3 = c3
     this.col2.on('data', (buf) => this.parseLongInput(buf))
     // Detect unplug: node-hid emits 'error' (and on some platforms 'close')
     // on each handle when the device disappears. First fire wins — we
@@ -101,6 +116,9 @@ export class MxKeypad extends EventEmitter {
     this.connected = true
   }
 
+  /** Why the most recent tryReopen() failed — for the caller's diagnostics. */
+  lastOpenError: string | null = null
+
   /**
    * Try to (re)open the device. Returns true on success, false when the
    * device isn't enumerable yet (caller polls). Safe to call repeatedly.
@@ -109,8 +127,10 @@ export class MxKeypad extends EventEmitter {
     if (this.connected) return true
     try {
       await this.open()
+      this.lastOpenError = null
       return true
-    } catch {
+    } catch (err) {
+      this.lastOpenError = (err as Error).message
       return false
     }
   }
@@ -121,10 +141,14 @@ export class MxKeypad extends EventEmitter {
     this.pressedLcd.clear()
     // Close every handle best-effort; one of them is already in a bad
     // state but the others may need an explicit release before re-open
-    // can succeed.
+    // can succeed. A wedged handle's close() can itself hang — cap the
+    // wait so 'disconnect' (and with it the reconnect loop) always fires.
     const handles = [this.col1, this.col2, this.col3]
     this.col1 = this.col2 = this.col3 = null
-    await Promise.allSettled(handles.map((h) => h?.close()))
+    await Promise.race([
+      Promise.allSettled(handles.map((h) => h?.close())),
+      new Promise<void>((resolve) => setTimeout(resolve, 1500).unref()),
+    ])
     this.emit('disconnect')
   }
 
