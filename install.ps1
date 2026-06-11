@@ -54,15 +54,32 @@ function Register-Task($name, $workdir, $logfile, $launcherPath) {
     # Per-task PowerShell launcher. Start-Process -RedirectStandardOutput
     # avoids the exclusive write-lock that PowerShell's *>> takes for the
     # entire script lifetime (lock leaks blocked restart attempts).
-    $logErr = $logfile -replace '\.log$', '.err'
+    #
+    # PID-file single-instance guard: Stop-ScheduledTask kills this launcher
+    # but NOT the detached node child. Without the guard, every restart
+    # stacked another instance — duplicate keypads fight over the HID device,
+    # duplicate sidecars fight over the port (and the NEW one loses).
+    $logErr  = $logfile -replace '\.log$', '.err'
+    $pidFile = $logfile -replace '\.log$', '.pid'
     $launcher = @"
 `$ErrorActionPreference = 'Stop'
+`$pidFile = '$pidFile'
+if (Test-Path `$pidFile) {
+    `$oldPid = [int](Get-Content `$pidFile -ErrorAction SilentlyContinue | Select-Object -First 1)
+    `$old = Get-Process -Id `$oldPid -ErrorAction SilentlyContinue
+    if (`$old -and `$old.ProcessName -eq 'node') {
+        `$old | Stop-Process -Force
+        Start-Sleep -Milliseconds 500
+    }
+}
 `$proc = Start-Process -FilePath '$nodeExe' ``
     -ArgumentList 'dist\index.js' ``
     -WorkingDirectory '$workdir' ``
     -RedirectStandardOutput '$logfile' ``
     -RedirectStandardError  '$logErr' ``
-    -NoNewWindow -PassThru -Wait
+    -NoNewWindow -PassThru
+Set-Content -Path `$pidFile -Value `$proc.Id
+`$proc.WaitForExit()
 exit `$proc.ExitCode
 "@
     Set-Content -Path $launcherPath -Value $launcher -Encoding UTF8
