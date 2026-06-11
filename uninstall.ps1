@@ -20,4 +20,18 @@ foreach ($name in @('mx-sidecar','mx-keypad')) {
     Write-Host "Unregistering $name..."
     Unregister-ScheduledTask -TaskName $name -Confirm:$false
 }
+
+# Stop-ScheduledTask kills the launcher wrapper but NOT the detached node
+# child — reap it via the PID file the launcher maintains.
+foreach ($svc in @('sidecar','keypad')) {
+    $pidFile = Join-Path $PSScriptRoot "logs\$svc.pid"
+    if (-not (Test-Path $pidFile)) { continue }
+    $nodePid = [int](Get-Content $pidFile -ErrorAction SilentlyContinue | Select-Object -First 1)
+    $proc = Get-Process -Id $nodePid -ErrorAction SilentlyContinue
+    if ($proc -and $proc.ProcessName -eq 'node') {
+        Write-Host "Stopping orphaned $svc node process (pid $nodePid)..."
+        $proc | Stop-Process -Force
+    }
+    Remove-Item $pidFile -Force -ErrorAction SilentlyContinue
+}
 Write-Host 'Uninstalled.' -ForegroundColor Green
