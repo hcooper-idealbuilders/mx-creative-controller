@@ -9,6 +9,7 @@ import { SidecarClient, type CommandResult } from './sidecar-client.js'
 import { renderLayout, needsAnimation, renderStartupAnimation } from './renderer.js'
 import { getEffectiveSessions, pruneOptimistic, type OptimisticEntry } from './optimistic.js'
 import { isActionEnabled } from './labels.js'
+import { columnsRemapped } from './remap.js'
 import { recordError, pruneErrors } from './errors.js'
 import { nextEffort, type EffortLevel } from './effort.js'
 import type { Command, SessionStatus } from './state.js'
@@ -199,10 +200,21 @@ async function repaint() {
 await repaint()
 
 const sidecar = new SidecarClient(SIDECAR_URL)
+// Press lockout after a column remap: when a session ends, later columns
+// shift left, and a press aimed at the old layout would hit a different
+// session (Approve meant for project A delivered to project B). 400ms is
+// enough to beat a press already in flight without feeling unresponsive.
+const REMAP_LOCKOUT_MS = 400
+let pressLockoutUntil = 0
+
 sidecar.on('sessions', (sessions: SessionStatus[]) => {
   // Cap at 3 visible (FIFO). Real state replaces wholesale — optimistic
   // overlays live in the separate map and are applied at paint time.
   const incoming = sessions.slice(0, 3)
+  if (columnsRemapped(currentSessions.map((s) => s.session_id), incoming.map((s) => s.session_id))) {
+    pressLockoutUntil = Date.now() + REMAP_LOCKOUT_MS
+    console.log('[keypad] columns remapped — brief press lockout')
+  }
   // Animation only fires when an incoming session_id is one we've never
   // seen in this keypad-service lifetime. Spurious empty broadcasts from
   // the hook rename race deliver the *same* session_id back, so the set
@@ -239,6 +251,10 @@ const longPressFired = new Set<number>()
 
 // Press dispatcher — map key index → (column, row) → command + session.
 keypad.on('press', (evt: PressEvent) => {
+  if (Date.now() < pressLockoutUntil) {
+    console.log('[keypad] press ignored — column remap lockout')
+    return
+  }
   const idx = evt.control.index
   const col = idx % 3
   const row = Math.floor(idx / 3)

@@ -102,11 +102,12 @@ setTimeout(() => { console.log(JSON.stringify(results)); process.exit(1) }, time
     $clientPath = Join-Path $env:TEMP 'mx-e2e-client.cjs'
     Set-Content -LiteralPath $clientPath -Value $nodeClient -Encoding UTF8
     $sidecarDir = Join-Path $Root 'sidecar'
-    $cmdOut = node $clientPath $sidecarDir $SessionId 60000 'continue' 'effort-low' 'focus' | Select-Object -Last 1
+    $cmdOut = node $clientPath $sidecarDir $SessionId 60000 'continue' 'effort-low' 'fast' 'focus' | Select-Object -Last 1
     $cmdResults = $cmdOut | ConvertFrom-Json
     Check 'approve command accepted' ($cmdResults[0].success -eq $true) ("$($cmdResults[0].error)")
     Check 'effort command accepted'  ($cmdResults[1].success -eq $true) ("$($cmdResults[1].error)")
-    Check 'focus command accepted'   ($cmdResults[2].success -eq $true) ("$($cmdResults[2].error)")
+    Check 'fast command accepted'    ($cmdResults[2].success -eq $true) ("$($cmdResults[2].error)")
+    Check 'focus command accepted'   ($cmdResults[3].success -eq $true) ("$($cmdResults[3].error)")
 
     Start-Sleep -Seconds 2
 
@@ -114,6 +115,7 @@ setTimeout(() => { console.log(JSON.stringify(results)); process.exit(1) }, time
     $received = @(Get-Content $SandboxLog -ErrorAction SilentlyContinue)
     Check 'approve keystroke (1) received'          ($received -contains '1') "got: $($received -join ' | ')"
     Check 'effort keystroke (/effort low) received' (($received | Where-Object { $_ -match '/effort low' }).Count -ge 1) ''
+    Check 'fast keystroke (/fast) received'         (($received | Where-Object { $_ -match '/fast' }).Count -ge 1) ''
 
     # ---- 5. Verify markApproved held the state ----
     $after = Get-Content $SessionPath -Raw | ConvertFrom-Json
