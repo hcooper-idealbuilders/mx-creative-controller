@@ -41,6 +41,15 @@ const LIVENESS_POLL_MS = 30_000
 
 const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms))
 
+/**
+ * How long a previously-seen session survives being absent from a directory
+ * read before the watcher drops it. Covers the hook's non-atomic fallback
+ * write path (delete+rename), where the file genuinely vanishes for a few
+ * ms — without grace, the session flickers out of one broadcast, the keypad
+ * repaints columns, and the remap lockout fires for nothing.
+ */
+export const MISSING_GRACE_MS = 800
+
 export class SessionsWatcher extends EventEmitter {
   sessions: SessionStatus[] = []
   private reloading = false
@@ -48,6 +57,8 @@ export class SessionsWatcher extends EventEmitter {
   private stopped = false
   private pollTimer: NodeJS.Timeout | null = null
   private fsWatcher: ReturnType<typeof fsWatch> | null = null
+  /** Last known status per session id + when it first went missing from disk. */
+  private lastKnown = new Map<string, { status: SessionStatus; missingSince: number | null }>()
 
   constructor(private dir: string) { super() }
 
@@ -145,6 +156,31 @@ export class SessionsWatcher extends EventEmitter {
     } catch (err) {
       console.error('[sessions-watcher] readdir failed:', (err as Error).message)
     }
+
+    // Missing-grace: keep recently-vanished sessions alive briefly, then
+    // schedule a confirming reload. Genuine SessionEnd deletions still
+    // disappear — just up to ~MISSING_GRACE_MS later.
+    const onDisk = new Set(out.map((s) => s.session_id))
+    for (const [id, entry] of this.lastKnown) {
+      if (onDisk.has(id)) continue
+      if (entry.missingSince === null) entry.missingSince = now
+      if (now - entry.missingSince < MISSING_GRACE_MS) {
+        out.push(entry.status)
+        setTimeout(() => { void this.reload() }, MISSING_GRACE_MS / 2).unref()
+      } else {
+        this.lastKnown.delete(id)
+      }
+    }
+    const newKnown = new Map<string, { status: SessionStatus; missingSince: number | null }>()
+    for (const s of out) {
+      const prev = this.lastKnown.get(s.session_id)
+      newKnown.set(s.session_id, {
+        status: s,
+        missingSince: onDisk.has(s.session_id) ? null : (prev?.missingSince ?? now),
+      })
+    }
+    this.lastKnown = newKnown
+
     out.sort((a, b) => (a.first_seen ?? '').localeCompare(b.first_seen ?? ''))
     this.sessions = out
     this.emit('change', this.sessions)

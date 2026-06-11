@@ -52,6 +52,17 @@ const LONG_PRESS_MS = 450
  */
 const WRITE_TIMEOUT_MS = 2000
 
+/**
+ * HID++ short report (0x11 → col1) setting panel brightness to 100%.
+ * Format from the lib's DefaultPropertiesService.setBrightness.
+ *
+ * The firmware dims the LCDs to black on its own idle timer (observed after
+ * USB suspend AND after ~1h of no button presses) — image writes then
+ * "succeed" into a dark panel. Asserted at open and re-asserted periodically
+ * by the keypad's tick; idempotent when already lit.
+ */
+const BRIGHTNESS_CMD = [0x11, 0xff, 0x0f, 0x2b, 0x00, 100, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+
 export class MxKeypad extends EventEmitter {
   private col1: HIDAsync | null = null
   private col2: HIDAsync | null = null
@@ -98,13 +109,8 @@ export class MxKeypad extends EventEmitter {
     this.col1 = c1
     this.col2 = c2
     this.col3 = c3
-    // Wake the panels. The device firmware can dim the LCDs to zero on its
-    // own (observed after an overnight USB suspend) — image writes then
-    // "succeed" into a black screen. Asserting brightness on every open is
-    // idempotent and guarantees painted content is actually visible.
-    // HID++ short report (0x11) → col1; format from the lib's
-    // DefaultPropertiesService.setBrightness.
-    await c1.write([0x11, 0xff, 0x0f, 0x2b, 0x00, 100, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0])
+    // Wake the panels immediately — see assertBrightness.
+    await c1.write(BRIGHTNESS_CMD)
     this.col2.on('data', (buf) => this.parseLongInput(buf))
     // Detect unplug: node-hid emits 'error' (and on some platforms 'close')
     // on each handle when the device disappears. First fire wins — we
@@ -188,6 +194,17 @@ export class MxKeypad extends EventEmitter {
     } catch (err) {
       // A failed/hung LCD write means the handle is wedged — go through the
       // disconnect path so the reconnect loop reopens fresh handles.
+      void this.handleDisconnect()
+      throw err
+    }
+  }
+
+  /** Re-assert full panel brightness; safe to call any time. */
+  async assertBrightness(): Promise<void> {
+    if (!this.connected || !this.col1) return
+    try {
+      await this.writeWithTimeout(this.col1, BRIGHTNESS_CMD)
+    } catch (err) {
       void this.handleDisconnect()
       throw err
     }

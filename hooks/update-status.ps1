@@ -248,13 +248,23 @@ $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
 # window where the sidecar's fs.watch-triggered read found no file at all and
 # dropped this session from the broadcast. File.Replace maps to ReplaceFile(),
 # atomic on NTFS — readers see either the old or the new content, never nothing.
-try {
-    if (Test-Path $statusPath) {
-        [System.IO.File]::Replace($tmpPath, $statusPath, $null)
-    } else {
-        [System.IO.File]::Move($tmpPath, $statusPath)
-    }
-} catch {
-    # e.g. the target vanished between Test-Path and Replace (SessionEnd race).
+# Retry the atomic swap through transient lock contention (sidecar reads,
+# concurrent hook fires) before surrendering to the non-atomic Move-Item —
+# every fallback use reopens the ENOENT window the watcher then has to
+# paper over with its missing-grace logic.
+$swapped = $false
+for ($i = 0; $i -lt 4 -and -not $swapped; $i++) {
+    if ($i -gt 0) { Start-Sleep -Milliseconds 25 }
+    try {
+        if (Test-Path $statusPath) {
+            [System.IO.File]::Replace($tmpPath, $statusPath, $null)
+        } else {
+            [System.IO.File]::Move($tmpPath, $statusPath)
+        }
+        $swapped = $true
+    } catch { }
+}
+if (-not $swapped) {
+    # Last resort (e.g. target vanished in a SessionEnd race).
     Move-Item -Path $tmpPath -Destination $statusPath -Force
 }

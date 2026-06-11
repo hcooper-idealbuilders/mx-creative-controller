@@ -312,10 +312,20 @@ keypad.on('press', (evt: PressEvent) => {
 // Refresh tick. We paint faster when something is animating (startup flurry
 // or any thinking session) so motion is smooth; otherwise the slower idle
 // cadence keeps us recovered from Options+ repaints.
+// Brightness keepalive: the firmware re-dims the panels on its own idle
+// timer (~1h observed), turning the keypad into a black brick while every
+// paint "succeeds". Re-asserting every 30s outruns any sleep timer.
+const BRIGHTNESS_KEEPALIVE_MS = 30_000
+let lastBrightnessAt = Date.now()
+
 let lastInterval = IDLE_REFRESH_MS
 let timer: NodeJS.Timeout = setInterval(tick, IDLE_REFRESH_MS)
 function tick() {
   void repaint()
+  if (Date.now() - lastBrightnessAt >= BRIGHTNESS_KEEPALIVE_MS) {
+    lastBrightnessAt = Date.now()
+    keypad.assertBrightness().catch((err) => console.error('[keypad] brightness keepalive failed:', (err as Error).message))
+  }
   const animating =
     animationStartedAt !== null ||
     needsAnimation(currentSessions)

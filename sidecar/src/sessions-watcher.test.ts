@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import { mkdtemp, writeFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { SessionsWatcher, isStale, SESSION_STALE_MS, type SessionStatus, type SessionState } from './sessions-watcher.js'
+import { SessionsWatcher, isStale, SESSION_STALE_MS, MISSING_GRACE_MS, type SessionStatus, type SessionState } from './sessions-watcher.js'
 
 let dir: string
 let watcher: SessionsWatcher
@@ -132,6 +132,28 @@ describe('SessionsWatcher', () => {
     const fs = await import('node:fs/promises')
     const remaining = await fs.readdir(dir)
     expect(remaining.map((f) => f.replace(/\.json$/, ''))).toEqual(['keep'])
+  })
+
+  it('a vanished file survives one reload (missing grace), then drops', async () => {
+    await writeSession('a', '2026-05-13T10:00:00Z')
+    await writeSession('b', '2026-05-13T11:00:00Z')
+    watcher = new SessionsWatcher(dir)
+    await watcher.start()
+    expect(watcher.sessions.map((s) => s.session_id)).toEqual(['a', 'b'])
+
+    // Simulate the hook's non-atomic fallback: file briefly gone.
+    const fs = await import('node:fs/promises')
+    await fs.rm(join(dir, 'b.json'))
+
+    // Immediately after deletion, b is still reported (grace window).
+    // Drive reload via the public start()-installed mechanisms by waiting
+    // for the fsWatch-triggered reload to land.
+    await new Promise((r) => setTimeout(r, 150))
+    expect(watcher.sessions.map((s) => s.session_id)).toContain('b')
+
+    // After the grace window + confirming reload, b is gone for real.
+    await new Promise((r) => setTimeout(r, MISSING_GRACE_MS + 400))
+    expect(watcher.sessions.map((s) => s.session_id)).toEqual(['a'])
   })
 
 })
