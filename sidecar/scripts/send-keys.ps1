@@ -45,6 +45,10 @@ public class MxWin32 {
     [DllImport("user32.dll", EntryPoint="GetWindowThreadProcessId")] public static extern uint GetWindowThreadProcessIdOut(IntPtr hWnd, out uint lpdwProcessId);
     [DllImport("user32.dll")] public static extern bool AttachThreadInput(uint idAttach, uint idAttachTo, bool fAttach);
     [DllImport("user32.dll")] public static extern bool IsIconic(IntPtr hWnd);
+    // Synthetic ALT tap: a process that has "sent input" is allowed to call
+    // SetForegroundWindow even under the foreground lock. VK_MENU = 0x12,
+    // KEYEVENTF_KEYUP = 0x02.
+    [DllImport("user32.dll")] public static extern void keybd_event(byte bVk, byte bScan, uint dwFlags, UIntPtr dwExtraInfo);
 }
 "@
 
@@ -140,16 +144,41 @@ function Force-Foreground {
 # into whatever is foreground — Hunter's Excel cell, his browser address bar,
 # etc. We poll GetForegroundWindow until it matches the target or we time out,
 # then return whether focus actually landed where we expected.
-function Set-ForegroundAndVerify {
-    param([IntPtr]$Hwnd, [int]$TimeoutMs = 300)
-    if ($Hwnd -eq [IntPtr]::Zero) { return $false }
-    Force-Foreground -Hwnd $Hwnd
+function Test-Foreground {
+    param([IntPtr]$Hwnd, [int]$TimeoutMs)
     $deadline = (Get-Date).AddMilliseconds($TimeoutMs)
     while ((Get-Date) -lt $deadline) {
         if ([MxWin32]::GetForegroundWindow() -eq $Hwnd) { return $true }
         Start-Sleep -Milliseconds 15
     }
     return $false
+}
+
+# Three escalating attempts — Windows refuses SetForegroundWindow when the
+# user is actively typing elsewhere (foreground lock), and the plain
+# AttachThreadInput trick alone loses that fight:
+#   1. AttachThreadInput trick (cheap, works when there's no contention)
+#   2. + synthetic ALT tap: after keybd_event this process counts as the
+#      last input sender, which exempts it from the foreground lock
+#   3. + minimize/restore bounce: a window being restored gets foreground
+#      by design, even under lock
+function Set-ForegroundAndVerify {
+    param([IntPtr]$Hwnd, [int]$TimeoutMs = 300)
+    if ($Hwnd -eq [IntPtr]::Zero) { return $false }
+
+    Force-Foreground -Hwnd $Hwnd
+    if (Test-Foreground -Hwnd $Hwnd -TimeoutMs $TimeoutMs) { return $true }
+
+    [MxWin32]::keybd_event(0x12, 0, 0, [UIntPtr]::Zero)      # ALT down
+    [MxWin32]::keybd_event(0x12, 0, 0x02, [UIntPtr]::Zero)   # ALT up
+    Force-Foreground -Hwnd $Hwnd
+    if (Test-Foreground -Hwnd $Hwnd -TimeoutMs $TimeoutMs) { return $true }
+
+    [MxWin32]::ShowWindow($Hwnd, 6) | Out-Null   # SW_MINIMIZE
+    Start-Sleep -Milliseconds 60
+    [MxWin32]::ShowWindow($Hwnd, 9) | Out-Null   # SW_RESTORE
+    Force-Foreground -Hwnd $Hwnd
+    return (Test-Foreground -Hwnd $Hwnd -TimeoutMs ($TimeoutMs + 200))
 }
 
 # Resolve the target window: direct HWND first, then PID, then fallback search.
@@ -194,9 +223,11 @@ if ($keys) {
         Force-Foreground -Hwnd $prevForeground
     }
 } else {
-    # 'focus' command: best-effort, no verification — bring Claude forward
-    # and leave it there even if Windows briefly denies the steal.
+    # 'focus' command: bringing the window forward IS the deliverable, so use
+    # the full escalation. Still no hard failure — worst case the taskbar
+    # button flashes (Windows' consolation prize when it denies the steal).
     $fgBefore = [MxWin32]::GetForegroundWindow()
-    Force-Foreground -Hwnd $hwnd
-    Write-PressLog -Outcome 'FOCUS' -TargetHwnd $hwnd -ForegroundHwnd $fgBefore
+    $landed = Set-ForegroundAndVerify -Hwnd $hwnd
+    $outcome = if ($landed) { 'FOCUS' } else { 'FOCUS-DENIED' }
+    Write-PressLog -Outcome $outcome -TargetHwnd $hwnd -ForegroundHwnd $fgBefore
 }
