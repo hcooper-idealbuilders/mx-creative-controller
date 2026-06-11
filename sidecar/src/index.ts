@@ -4,6 +4,7 @@ import { SessionsWatcher } from './sessions-watcher.js'
 import { IpcServer, type CommandMessage } from './ipc-server.js'
 import { KeystrokeSender } from './keystroke-sender.js'
 import { routeCommand } from './routing.js'
+import { listChildren, indicatesApproval } from './approval-detector.js'
 
 const SESSIONS_DIR =
   process.env.MX_SESSIONS_DIR ??
@@ -18,7 +19,7 @@ const PORT = Number(process.env.MX_SIDECAR_PORT ?? 9876)
  * working. Write the truth we know into the file: it's thinking now.
  * The next real hook event overwrites this regardless.
  */
-async function markApproved(sessionId: string): Promise<void> {
+async function markApproved(sessionId: string, source = 'KeypadApprove'): Promise<void> {
   const path = join(SESSIONS_DIR, `${sessionId}.json`)
   const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms))
   let lastErr: Error | null = null
@@ -35,7 +36,7 @@ async function markApproved(sessionId: string): Promise<void> {
       if (s.state !== 'waiting_input') return  // a real hook event beat us — its truth wins
       s.state = 'thinking'
       s.notification_message = null
-      s.last_event = 'KeypadApprove'
+      s.last_event = source
       s.last_updated = new Date().toISOString()
       const json = JSON.stringify(s, null, 2)
       const tmp = `${path}.tmp`
@@ -101,6 +102,33 @@ server.on('command', async (cmd: CommandMessage) => {
     })
   }
 })
+
+// Keyboard-approval detection: see approval-detector.ts. Polls only while
+// at least one session is parked on a permission prompt.
+const APPROVAL_POLL_MS = 2500
+let approvalPollBusy = false
+setInterval(async () => {
+  if (approvalPollBusy) return
+  approvalPollBusy = true
+  try {
+    const parked = watcher.sessions.filter(
+      (s) =>
+        s.state === 'waiting_input' &&
+        /permission/i.test(s.notification_message ?? '') &&
+        s.claude_code_pid,
+    )
+    for (const s of parked) {
+      const children = await listChildren(s.claude_code_pid!)
+      const promptShownAt = Date.parse(s.last_updated ?? '') || 0
+      if (indicatesApproval(children, promptShownAt)) {
+        console.log(`[mx-sidecar] ${s.session_id.slice(0, 8)}… keyboard approval detected (tool child spawned)`)
+        await markApproved(s.session_id, 'KeyboardApprove')
+      }
+    }
+  } finally {
+    approvalPollBusy = false
+  }
+}, APPROVAL_POLL_MS).unref()
 
 await watcher.start()
 server.start()
