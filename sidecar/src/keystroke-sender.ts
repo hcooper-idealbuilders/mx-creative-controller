@@ -32,18 +32,28 @@ export class KeystrokeSender {
     if (claudeHwnd) args.push('-ClaudeHwnd', String(claudeHwnd))
     if (claudePid)  args.push('-ClaudePid',  String(claudePid))
     if (projectHint) args.push('-ProjectHint', projectHint)
-    if (tabTitle) args.push('-TabTitle', tabTitle)
+    // Clamp: a corrupted (exponentially re-mojibake'd) tab title once blew
+    // the spawn command-line limit (ENAMETOOLONG) and crash-looped the
+    // sidecar. Titles are tens of chars; anything longer is garbage.
+    if (tabTitle) args.push('-TabTitle', tabTitle.slice(0, 200))
     if (requireTabMatch) args.push('-RequireTabMatch')
 
     return new Promise((resolve, reject) => {
-      const proc = spawn('powershell', args, { windowsHide: true })
-      let stderr = ''
-      proc.stderr.on('data', (chunk) => { stderr += chunk.toString() })
-      proc.on('exit', (code) => {
-        if (code === 0) resolve()
-        else reject(new Error(`send-keys exit ${code}: ${stderr}`))
-      })
-      proc.on('error', reject)
+      // spawn can throw SYNCHRONOUSLY (e.g. ENAMETOOLONG) — without this
+      // try/catch the throw escapes the async 'command' handler as an
+      // unhandled rejection and kills the whole sidecar process.
+      try {
+        const proc = spawn('powershell', args, { windowsHide: true })
+        let stderr = ''
+        proc.stderr.on('data', (chunk) => { stderr += chunk.toString() })
+        proc.on('exit', (code) => {
+          if (code === 0) resolve()
+          else reject(new Error(`send-keys exit ${code}: ${stderr}`))
+        })
+        proc.on('error', reject)
+      } catch (err) {
+        reject(err as Error)
+      }
     })
   }
 }

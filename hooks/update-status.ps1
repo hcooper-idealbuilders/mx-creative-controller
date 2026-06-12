@@ -55,8 +55,13 @@ $statusPath = Join-Path $sessionsDir "$sessionId.json"
 # Load existing per-session status, or initialize.
 # Always rebuild as a fully-shaped pscustomobject so missing fields from an
 # older schema (e.g. pre-claude_hwnd files) get added on the next event.
+# -Encoding UTF8 is load-bearing: the file is written UTF-8 without BOM, and
+# BOM-less reads in Windows PowerShell default to ANSI — non-ASCII content
+# (e.g. the braille spinner glyph in tab titles) mojibakes and RE-MANGLES
+# BIGGER on every hook fire, exponentially, until the string blew past the
+# spawn command-line limit and crash-looped the sidecar (ENAMETOOLONG).
 $loaded = if (Test-Path $statusPath) {
-    try { Get-Content $statusPath -Raw | ConvertFrom-Json } catch { $null }
+    try { Get-Content $statusPath -Raw -Encoding UTF8 | ConvertFrom-Json } catch { $null }
 } else { $null }
 
 function Get-FieldOrDefault {
@@ -78,6 +83,11 @@ $status = [pscustomobject]@{
     first_seen    = Get-FieldOrDefault $loaded 'first_seen'   $nowIso
     last_event    = Get-FieldOrDefault $loaded 'last_event'   $null
     last_updated  = Get-FieldOrDefault $loaded 'last_updated' $null
+}
+
+# Same corruption firewall for values seeded from a pre-fix file.
+if ($status.tab_title -and $status.tab_title.Length -gt 160) {
+    $status.tab_title = $status.tab_title.Substring(0, 160)
 }
 
 $status.state = switch ($Event) {
@@ -208,7 +218,14 @@ if ($resolveWindow) {
                         # window title is this session's TAB title — the only
                         # moment we can learn it. send-keys uses it to find the
                         # right tab when sessions share a multi-tab WT window.
-                        if ($picked.MainWindowTitle) { $status.tab_title = [string]$picked.MainWindowTitle }
+                        # Hard cap as a corruption firewall: a title should be
+                        # tens of chars; anything huge means an encoding bug
+                        # upstream and must not propagate into spawn args.
+                        if ($picked.MainWindowTitle) {
+                            $t = [string]$picked.MainWindowTitle
+                            if ($t.Length -gt 160) { $t = $t.Substring(0, 160) }
+                            $status.tab_title = $t
+                        }
                     }
                 }
             } catch { }
