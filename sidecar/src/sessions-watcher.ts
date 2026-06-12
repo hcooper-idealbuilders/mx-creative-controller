@@ -145,8 +145,11 @@ export class SessionsWatcher extends EventEmitter {
           console.log(`[sessions-watcher] pruned ${f} (PID ${livenessPid} dead)`)
           continue
         }
-        // Fallback: if neither PID is available, use the 2-hour timestamp check.
-        if (isStale(parsed.last_updated, now)) {
+        // Fallback ONLY when no PID is available: a live session can sit
+        // idle past any timestamp threshold (overnight terminal left open)
+        // and must not be evicted — this wrongly pruned a healthy session
+        // that had simply been quiet since 3am.
+        if (!livenessPid && isStale(parsed.last_updated, now)) {
           await unlink(path).catch(() => {})
           console.log(`[sessions-watcher] pruned stale ${f} (last_updated ${parsed.last_updated})`)
           continue
