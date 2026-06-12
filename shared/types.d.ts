@@ -39,6 +39,12 @@ export interface SessionStatus {
   claude_pid: number | null
   /** Terminal window handle; preferred over claude_pid when targeting a window for keystrokes. */
   claude_hwnd: number | null
+  /**
+   * The session's tab title, captured at UserPromptSubmit while its tab was
+   * provably active (foreground). Lets send-keys pick the right tab when
+   * several sessions share one multi-tab Windows Terminal window.
+   */
+  tab_title: string | null
   first_seen: string | null
   last_event: string | null
   last_updated: string | null

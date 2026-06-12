@@ -11,7 +11,16 @@ param(
 
     # Optional disambiguator when window can't be resolved by handle or PID.
     # The fallback terminal search prefers windows whose title contains this.
-    [string]$ProjectHint
+    [string]$ProjectHint,
+
+    # The session's tab title (captured by the hook while that tab was
+    # provably active). Used with -RequireTabMatch.
+    [string]$TabTitle,
+
+    # Set when MULTIPLE sessions share the target window (multi-tab WT).
+    # Keys must then only be sent once the active tab's title matches
+    # TabTitle — cycling tabs with Ctrl+Tab to find it — or not at all.
+    [switch]$RequireTabMatch
 )
 
 $ErrorActionPreference = 'Stop'
@@ -49,8 +58,17 @@ public class MxWin32 {
     // SetForegroundWindow even under the foreground lock. VK_MENU = 0x12,
     // KEYEVENTF_KEYUP = 0x02.
     [DllImport("user32.dll")] public static extern void keybd_event(byte bVk, byte bScan, uint dwFlags, UIntPtr dwExtraInfo);
+    [DllImport("user32.dll", CharSet=CharSet.Unicode)] public static extern int GetWindowText(IntPtr hWnd, System.Text.StringBuilder lpString, int nMaxCount);
+    [DllImport("user32.dll")] public static extern bool SystemParametersInfo(uint uiAction, uint uiParam, IntPtr pvParam, uint fWinIni);
 }
 "@
+
+# Zero the foreground lock timeout for this desktop session (volatile — no
+# SPIF_UPDATEINIFILE, so it resets at logon; we re-apply per press). Without
+# this, an actively-used app (observed: chrome during a click-storm) wins the
+# foreground fight against every escalation level and Approve gets refused.
+# SPI_SETFOREGROUNDLOCKTIMEOUT = 0x2001, SPIF_SENDCHANGE = 0x2.
+[void][MxWin32]::SystemParametersInfo(0x2001, 0, [IntPtr]::Zero, 0x2)
 
 # Resolve the process name that owns a window handle. Used purely for
 # diagnostic logging — never for control flow — so we swallow all errors
@@ -181,6 +199,46 @@ function Set-ForegroundAndVerify {
     return (Test-Foreground -Hwnd $Hwnd -TimeoutMs ($TimeoutMs + 200))
 }
 
+# ---- Tab targeting (multi-tab Windows Terminal) ----
+# One WT window hosts many tabs; the window title IS the active tab's title.
+# Claude Code titles its tab with the task summary plus a status glyph
+# (e.g. "⠂ Investigate project after folder restructuring"), so we strip
+# leading non-alphanumerics before comparing.
+
+function Get-NormalizedWindowTitle {
+    param([IntPtr]$Hwnd)
+    $sb = New-Object System.Text.StringBuilder 512
+    [void][MxWin32]::GetWindowText($Hwnd, $sb, 512)
+    return ($sb.ToString() -replace '^[^\p{L}\p{N}]+', '').Trim()
+}
+
+function Test-TitleMatch {
+    param([string]$Current, [string]$Want)
+    if (-not $Current -or -not $Want) { return $false }
+    $c = $Current.ToLowerInvariant(); $w = $Want.ToLowerInvariant()
+    # Containment either way: the live title may have grown a suffix, or the
+    # stored one may be a truncation. Tiny strings must match exactly.
+    if ($c.Length -lt 4 -or $w.Length -lt 4) { return $c -eq $w }
+    return ($c.Contains($w) -or $w.Contains($c))
+}
+
+# Cycle tabs (Ctrl+Tab) until the active tab's title matches the session's
+# stored tab title. The window must already be foreground. Returns $true when
+# the right tab is active. A full lap without a match → $false (the stored
+# title drifted, or the tab closed) — caller must NOT type.
+function Select-TargetTab {
+    param([IntPtr]$Hwnd, [string]$WantTitle, [int]$MaxTabs = 9)
+    $want = ($WantTitle -replace '^[^\p{L}\p{N}]+', '').Trim()
+    if (-not $want) { return $false }
+    for ($i = 0; $i -lt $MaxTabs; $i++) {
+        $current = Get-NormalizedWindowTitle -Hwnd $Hwnd
+        if (Test-TitleMatch -Current $current -Want $want) { return $true }
+        [System.Windows.Forms.SendKeys]::SendWait('^{TAB}')
+        Start-Sleep -Milliseconds 180
+    }
+    return $false
+}
+
 # Resolve the target window: direct HWND first, then PID, then fallback search.
 $hwnd = [IntPtr]::Zero
 if ($ClaudeHwnd -gt 0) { $hwnd = [IntPtr]$ClaudeHwnd }
@@ -213,6 +271,18 @@ if ($keys) {
         Write-Error "send-keys: target window did not come to foreground (hwnd=$hwnd, foreground=$fg). Refusing to send '$Command'."
         exit 3
     }
+    if ($RequireTabMatch) {
+        # Multiple sessions share this window — typing into the active tab
+        # would hit a SIBLING session. Find this session's tab first.
+        if (-not (Select-TargetTab -Hwnd $hwnd -WantTitle $TabTitle)) {
+            Write-PressLog -Outcome 'TAB-NOT-FOUND' -TargetHwnd $hwnd -ForegroundHwnd $prevForeground -Detail "want=$TabTitle"
+            if ($prevForeground -ne [IntPtr]::Zero -and $prevForeground -ne $hwnd) {
+                Force-Foreground -Hwnd $prevForeground
+            }
+            Write-Error "send-keys: shared window and the session's tab couldn't be located (want title ~ '$TabTitle'). Refusing to send '$Command'."
+            exit 4
+        }
+    }
     [System.Windows.Forms.SendKeys]::SendWait($keys)
     Write-PressLog -Outcome 'OK' -TargetHwnd $hwnd -ForegroundHwnd $prevForeground -Detail "keys=$keys"
     # Restore prior foreground unless it was Claude itself (then there's
@@ -228,6 +298,11 @@ if ($keys) {
     # button flashes (Windows' consolation prize when it denies the steal).
     $fgBefore = [MxWin32]::GetForegroundWindow()
     $landed = Set-ForegroundAndVerify -Hwnd $hwnd
+    # Best-effort tab switch: focusing the window with a sibling session's
+    # tab on top isn't what the user meant by "Focus".
+    if ($landed -and $RequireTabMatch) {
+        $null = Select-TargetTab -Hwnd $hwnd -WantTitle $TabTitle
+    }
     $outcome = if ($landed) { 'FOCUS' } else { 'FOCUS-DENIED' }
     Write-PressLog -Outcome $outcome -TargetHwnd $hwnd -ForegroundHwnd $fgBefore
 }

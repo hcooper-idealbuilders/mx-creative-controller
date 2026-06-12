@@ -84,8 +84,21 @@ server.on('command', async (cmd: CommandMessage) => {
     return
   }
   console.log(`[mx-sidecar] ${cmd.sessionId.slice(0, 8)}… state=${session.state} → ${result.keystroke}`)
+  // When several sessions share one window (multi-tab Windows Terminal),
+  // window-level targeting isn't enough — keystrokes land in whichever tab
+  // is active. Require send-keys to locate the session's tab by title.
+  const sharedWindow =
+    session.claude_hwnd != null &&
+    watcher.sessions.filter((s) => s.claude_hwnd === session.claude_hwnd).length > 1
   try {
-    await sender.send(result.keystroke, session.claude_pid, session.claude_hwnd, session.project)
+    await sender.send(
+      result.keystroke,
+      session.claude_pid,
+      session.claude_hwnd,
+      session.project,
+      session.tab_title,
+      sharedWindow,
+    )
     if (result.keystroke === 'approve') {
       await markApproved(cmd.sessionId)  // triggers a fresh broadcast via fsWatch
     }

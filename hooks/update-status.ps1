@@ -74,6 +74,7 @@ $status = [pscustomobject]@{
     session_id    = $sessionId
     claude_pid    = Get-FieldOrDefault $loaded 'claude_pid'   $null
     claude_hwnd   = Get-FieldOrDefault $loaded 'claude_hwnd'  $null
+    tab_title     = Get-FieldOrDefault $loaded 'tab_title'    $null
     first_seen    = Get-FieldOrDefault $loaded 'first_seen'   $nowIso
     last_event    = Get-FieldOrDefault $loaded 'last_event'   $null
     last_updated  = Get-FieldOrDefault $loaded 'last_updated' $null
@@ -201,7 +202,14 @@ if ($resolveWindow) {
                 $fg = [MxHook.Win32]::GetForegroundWindow()
                 if ($fg -ne [IntPtr]::Zero) {
                     $picked = $terminals | Where-Object { [int64]$_.MainWindowHandle -eq [int64]$fg } | Select-Object -First 1
-                    if ($picked) { $resolveMethod = 'FG' }
+                    if ($picked) {
+                        $resolveMethod = 'FG'
+                        # The user is typing in THIS session right now, so the
+                        # window title is this session's TAB title — the only
+                        # moment we can learn it. send-keys uses it to find the
+                        # right tab when sessions share a multi-tab WT window.
+                        if ($picked.MainWindowTitle) { $status.tab_title = [string]$picked.MainWindowTitle }
+                    }
                 }
             } catch { }
         }

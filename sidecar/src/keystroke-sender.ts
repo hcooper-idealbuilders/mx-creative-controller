@@ -20,6 +20,8 @@ export class KeystrokeSender {
     claudePid: number | null,
     claudeHwnd: number | null,
     projectHint?: string | null,
+    tabTitle?: string | null,
+    requireTabMatch = false,
   ): Promise<void> {
     const args = [
       '-NoProfile',
@@ -30,6 +32,8 @@ export class KeystrokeSender {
     if (claudeHwnd) args.push('-ClaudeHwnd', String(claudeHwnd))
     if (claudePid)  args.push('-ClaudePid',  String(claudePid))
     if (projectHint) args.push('-ProjectHint', projectHint)
+    if (tabTitle) args.push('-TabTitle', tabTitle)
+    if (requireTabMatch) args.push('-RequireTabMatch')
 
     return new Promise((resolve, reject) => {
       const proc = spawn('powershell', args, { windowsHide: true })
